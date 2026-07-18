@@ -8,3 +8,4 @@
    **Univariate Data Analysis**
    **Air Temperature:-** Symmetric, Bimodal,Two primary operation zones [peaked at 298K and 302K], High overall variance.
    **Process Temperature:-** Almost symmetric ( with a slight [right skew]) , Mutimodal [with prominent peaks around 309K and 310.5K], High overall variance.
+   ![Process Temperature KDE](process_temp_kde.png)
