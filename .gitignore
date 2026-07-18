@@ -1,0 +1,8 @@
+# Ignore all CSV files (keeps your data private and repository light)
+*.csv
+
+# Ignore virtual environment folders
+.ipynb_checkpoints/
+ml_env/
+venv/
+.conda/
