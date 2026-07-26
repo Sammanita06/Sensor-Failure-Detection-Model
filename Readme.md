@@ -29,6 +29,11 @@
 
    **Bivariate Data Analysis**
 
-   **Air Temperature VS Process Temperature:-** Positive Corellation , Curvilinear Relationship,Strong strength of correlation.
+   **Air Temperature VS Process Temperature:-** Strong Positive Linear Correlation (~0.85+ Pearson correlation). The overall trend shows a direct proportional             relationship with noticeable clustered operational bands/steps.
 
    ![Air VS Process Temperature Scatter Plot](air_process_temp_scatter.png)
+
+   **Rotational Speed VS Torque:-** Strong Negative Non-Linear (Curvilinear / Inverse) Relationship ($\sim -0.87$ Pearson correlation). Reflects underlying mechanical     power constraints ($\text{Power} \propto \text{Torque} \times \text{RPM}$).
+
+   ![Rotational Speed VS Torque Scatter Plot](rotational_speed_torque_scatter.png)
+
