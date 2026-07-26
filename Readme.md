@@ -19,6 +19,10 @@
 
    ![Torque KDE Plot](torque_kde.png)
 
-   **Tool Wear(min):-** Symmetric,Unimodal,High overall variance.
+   **Tool Wear(min):-** Symmetric,Uniformly distributed (flat plateau across ~0 to 240 min), showing an even spread of tool age throughout the dataset.
 
    ![Tool Wear KDE Plot](tool_wear_kde.png)
+
+    **Rotational Speed(rpm):-** Unimodal(with prominent peak around 1500 rpm),Low variance, Right skewed.
+
+    ![Rotational Speed KDE Plot](rotational_speed_kde.png)
