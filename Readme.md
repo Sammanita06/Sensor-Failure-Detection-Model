@@ -14,3 +14,7 @@
    **Process Temperature:-** Almost symmetric ( with a slight [right skew]) , Mutimodal [with prominent peaks around 309K and 310.5K], High overall variance.
    
    ![Process Temperature KDE](process_temp_kde.png)
+
+   **Torque[Nm]:-** Symmetric,Unimodal, Low overall variance.
+
+   ![Torque KDE Plot](torque_kde.png)
