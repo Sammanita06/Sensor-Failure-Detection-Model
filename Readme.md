@@ -37,3 +37,4 @@
 
    ![Rotational Speed VS Torque Scatter Plot](rotational_speed_torque_scatter.png)
 
+   **Machine Type Variant VS Operating Sensors (`sns.barplot`):-** Across Low (L), Medium (M), and High (H) quality variants, baseline mean values for Torque (~40 Nm),    Rotational Speed (~1530 rpm), and Tool Wear remain constant. This confirms that higher failure rates in Type 'L' machines stem from lower structural tolerance          limits rather than harsher operational usage.
