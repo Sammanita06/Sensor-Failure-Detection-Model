@@ -15,6 +15,10 @@
    
    ![Process Temperature KDE](process_temp_kde.png)
 
-   **Torque[Nm]:-** Symmetric,Unimodal, Low overall variance.
+   **Torque[Nm]:-** Symmetric,Unimodal(Bell Shaped), Moderate variance and  centered around ~40 Nm across a broad operational range (~0 to 80 Nm).
 
    ![Torque KDE Plot](torque_kde.png)
+
+   **Tool Wear(min):-** Symmetric,Unimodal,High overall variance.
+
+   ![Tool Wear KDE Plot](tool_wear_kde.png)
