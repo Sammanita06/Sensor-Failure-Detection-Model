@@ -25,4 +25,4 @@
 
     **Rotational Speed(rpm):-** Unimodal(with prominent peak around 1500 rpm),Low variance, Right skewed.
 
-    ![Rotational Speed KDE Plot](rotational_speed_kde.png)
+   ![Rotational Speed KDE Plot](rotational_speed_kde.png)
