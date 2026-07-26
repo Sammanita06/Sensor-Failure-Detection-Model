@@ -26,3 +26,9 @@
    **Rotational Speed(rpm):-** Unimodal , Right skewed distribution with a prominent peak around ~1500 rpm; most operational data stays tightly clustered (low variance    baseline) with a long tail extending toward 2800+ rpm.
 
    ![Rotational Speed KDE Plot](rotational_speed_kde.png)
+
+   **Bivariate Data Analysis**
+
+   **Air Temperature VS Process Temperature:-** Positive Corellation , Curvilinear Relationship,Strong strength of correlation.
+
+   ![Air VS Process Temperature Scatter Plot](air_process_temp_scatter.png)
