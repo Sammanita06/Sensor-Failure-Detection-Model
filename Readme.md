@@ -55,11 +55,11 @@
    **Pair Plot Insights**  
    
    **TWF (Tool Wear Failure):**
-   **Visual Observation:** TWF events cluster strictly along the upper threshold of the `Tool wear [min]` axis, independent of operational dynamics like `Rotational       speed` or `Torque`.
+   **Visual Observation:** TWF events cluster strictly along the upper threshold of the `Tool wear [min]` axis, independent of operational dynamics like `Rotational speed` or `Torque`.
    **Engineering Takeaway:** Tool Wear Failure is primarily time- and wear-accumulative ($>200\text{ min}$). It is driven by mechanical wear rather than instantaneous     torque spikes.
 
   **OSF (Overstrain Failure):**
-  **Visual Observation:** OSF instances concentrate heavily in the high-`Torque` and high-`Tool wear` region (top-right scatter region), as well as low-`Rotational       speed` zones.
+  **Visual Observation:** OSF instances concentrate heavily in the high-`Torque` and high-`Tool wear` region (top-right scatter region), as well as low-`Rotational   speed` zones.
   **Engineering Takeaway:** Overstrain is a multi-variable failure. It occurs when a heavily worn component experiences high mechanical force ($\text{Tool Wear} \times   \text{Torque}$). Because torque and rotational speed are inversely proportional, low RPM zones correspond to peak torque risk.
 
   **PWF (Power Failure):**
