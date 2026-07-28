@@ -49,18 +49,17 @@
    
 
    **Multivariate Analysis**
+
    
    **Heatmap Insights:-** From the Pearson correlation heatmap, it can be inferred that air and process temperatures have a strong positive linear relationship,           whereas torque and rotational speed have a strong negative linear correlation. Additionally, failure modes like HDF and PWF show moderate positive linear               correlations with machine failure. However, from the sensor vs. failure mode heatmap, no significant linear correlation is observed between raw sensor readings and     individual failure types.
 
    **Pair Plot Insights**  
    
-   **TWF (Tool Wear Failure):**
-   **Visual Observation:** TWF events cluster strictly along the upper threshold of the `Tool wear [min]` axis, independent of operational dynamics like `Rotational speed` or `Torque`.
-   **Engineering Takeaway:** Tool Wear Failure is primarily time- and wear-accumulative ($>200\text{ min}$). It is driven by mechanical wear rather than instantaneous     torque spikes.
+   **TWF (Tool Wear Failure):** Tool Wear Failure is primarily time- and wear-accumulative ($>200\text{ min}$). It is driven by mechanical wear rather than                instantaneous torque spikes.
 
-  **OSF (Overstrain Failure):**
-  **Visual Observation:** OSF instances concentrate heavily in the high-`Torque` and high-`Tool wear` region (top-right scatter region), as well as low-`Rotational speed` zones.
-  **Engineering Takeaway:** Overstrain is a multi-variable failure. It occurs when a heavily worn component experiences high mechanical force ($\text{Tool Wear} \times   \text{Torque}$). Because torque and rotational speed are inversely proportional, low RPM zones correspond to peak torque risk.
+  **OSF (Overstrain Failure):** Overstrain is a multi-variable failure. It occurs when a heavily worn component experiences high mechanical force ($\text{Tool Wear}      \times   \text{Torque}$). Because torque and rotational speed are inversely proportional, low RPM zones correspond to peak torque risk.
 
-  **PWF (Power Failure):**
-  **Visual Observation:** PWF points map along the extreme outer and inner boundary curves of the `Torque` vs. `Rotational speed` scatter distribution.                   **Engineering Takeaway:** Power Failure is dictated by the continuous power product ($\text{Power} \propto \text{Torque} \times \text{RPM}$). Failures are triggered    when operation breaches upper power limits ($>9000\text{ W}$) or drops below minimum thresholds ($<3500\text{ W}$), rather than single-sensor extremes.
+  **PWF (Power Failure):** Power Failure is dictated by the continuous power product ($\text{Power} \propto \text{Torque} \times \text{RPM}$). Failures are triggered     when operation breaches upper power limits ($>9000\text{ W}$) or drops below minimum thresholds ($<3500\text{ W}$), rather than single-sensor extremes.
+
+  **Dedicated Scatter Plot Analysis (HDF):**
+  **HDF (Heat Dissipation Failure):** A focused scatter plot of `Process temperature` vs. `Air temperature` isolates thermal failure points. HDF triggers almost          exclusively when the temperature differential ($\Delta T = T_{\text{process}} - T_{\text{air}}$) falls below critical dissipation limits under elevated ambient         temperatures.
