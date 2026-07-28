@@ -52,7 +52,7 @@
    
    **Heatmap Insights:-** From the Pearson correlation heatmap, it can be inferred that air and process temperatures have a strong positive linear relationship,           whereas torque and rotational speed have a strong negative linear correlation. Additionally, failure modes like HDF and PWF show moderate positive linear               correlations with machine failure. However, from the sensor vs. failure mode heatmap, no significant linear correlation is observed between raw sensor readings and     individual failure types.
 
-   **Pair Plot Insights** 
+   **Pair Plot Insights**  
    
    **TWF (Tool Wear Failure):**
    **Visual Observation:** TWF events cluster strictly along the upper threshold of the `Tool wear [min]` axis, independent of operational dynamics like `Rotational       speed` or `Torque`.
