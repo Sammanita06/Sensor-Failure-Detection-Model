@@ -51,7 +51,13 @@
    **Multivariate Analysis**
 
    
-   **Heatmap Insights:-** From the Pearson correlation heatmap, it can be inferred that air and process temperatures have a strong positive linear relationship,           whereas torque and rotational speed have a strong negative linear correlation. Additionally, failure modes like HDF and PWF show moderate positive linear               correlations with machine failure. However, from the sensor vs. failure mode heatmap, no significant linear correlation is observed between raw sensor readings and     individual failure types.
+   **Pearson Correlation Matrix:-** From the Pearson correlation heatmap, it can be inferred that air and process temperatures have a strong positive linear               relationship, whereas torque and rotational speed have a strong negative linear correlation. Additionally, failure modes like HDF and PWF show moderate                 positive linear correlations with machine failure. However, from the sensor vs. failure mode heatmap, no significant linear correlation is observed  between raw        sensor readings and individual failure types.
+
+   **Engineered Feature Correlations Across Failure Modes Heatmap** 
+   Correlation Analysis: Pearson correlation revealed low linear dependency across failure modes ($r < 0.3$), indicating that machine breakdowns follow non-linear,        threshold-driven mechanics rather than linear trends.
+   Model Selection Justification: This lack of linear correlation confirms that standard linear classifiers are insufficient and strongly justifies deploying non-         linear, tree-based models (e.g., Random Forest, XGBoost).
+
+   ![Feature Correlations Across Failure Modes Heatmap](correlation_heatmap.png)
 
    **Pair Plot Insights**  
    
