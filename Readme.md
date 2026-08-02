@@ -2,8 +2,7 @@
 
 **This repository contains an end to end machine learningpipeline built to predict industrial machine failures based on continuous sensor telemetry.**
 
-**Exploratory Data Analysis**
-   After performing comprehensive Univariate, Bivariate and Multivariate analysis, several critical operational and structural characteristics were uncovered:
+**Exploratory Data Analysis**                                                                                                                                              After performing comprehensive Univariate, Bivariate and Multivariate analysis, several critical operational and structural characteristics were uncovered:
    
    **Univariate Data Analysis**
    
@@ -53,19 +52,26 @@
    
    **Pearson Correlation Matrix:-** From the Pearson correlation heatmap, it can be inferred that air and process temperatures have a strong positive linear               relationship, whereas torque and rotational speed have a strong negative linear correlation. Additionally, failure modes like HDF and PWF show moderate                 positive linear correlations with machine failure. However, from the sensor vs. failure mode heatmap, no significant linear correlation is observed  between raw        sensor readings and individual failure types.
 
+   **Pair Plot Insights**  
+   
+   **TWF (Tool Wear Failure):** Tool Wear Failure is primarily time- and wear-accumulative ($>200\text{ min}$). It is driven by mechanical wear rather than                instantaneous torque spikes.
+
+   **OSF (Overstrain Failure):** Overstrain is a multi-variable failure. It occurs when a heavily worn component experiences high mechanical force ($\text{Tool Wear}      \times   \text{Torque}$). Because torque and rotational speed are inversely proportional, low RPM zones correspond to peak torque risk.
+
+   **PWF (Power Failure):** Power Failure is dictated by the continuous power product ($\text{Power} \propto \text{Torque} \times \text{RPM}$). Failures are triggered     when operation breaches upper power limits ($>9000\text{ W}$) or drops below minimum thresholds ($<3500\text{ W}$), rather than single-sensor extremes.
+
+   **Dedicated Scatter Plot Analysis (HDF):**
+   **HDF (Heat Dissipation Failure):** A focused scatter plot of `Process temperature` vs. `Air temperature` isolates thermal failure points. HDF triggers almost          exclusively when the temperature differential ($\Delta T = T_{\text{process}} - T_{\text{air}}$) falls below critical dissipation limits under elevated ambient         temperatures.
+
+
+**Feature Engineering**
+
+   **Feature Construction**
+
    **Engineered Feature Correlations Across Failure Modes Heatmap** 
    Correlation Analysis: Pearson correlation revealed low linear dependency across failure modes ($r < 0.3$), indicating that machine breakdowns follow non-linear,        threshold-driven mechanics rather than linear trends.
    Model Selection Justification: This lack of linear correlation confirms that standard linear classifiers are insufficient and strongly justifies deploying non-         linear, tree-based models (e.g., Random Forest, XGBoost).
 
    ![Feature Correlations Across Failure Modes Heatmap](correlation_heatmap.png)
 
-   **Pair Plot Insights**  
-   
-   **TWF (Tool Wear Failure):** Tool Wear Failure is primarily time- and wear-accumulative ($>200\text{ min}$). It is driven by mechanical wear rather than                instantaneous torque spikes.
-
-  **OSF (Overstrain Failure):** Overstrain is a multi-variable failure. It occurs when a heavily worn component experiences high mechanical force ($\text{Tool Wear}      \times   \text{Torque}$). Because torque and rotational speed are inversely proportional, low RPM zones correspond to peak torque risk.
-
-  **PWF (Power Failure):** Power Failure is dictated by the continuous power product ($\text{Power} \propto \text{Torque} \times \text{RPM}$). Failures are triggered     when operation breaches upper power limits ($>9000\text{ W}$) or drops below minimum thresholds ($<3500\text{ W}$), rather than single-sensor extremes.
-
-  **Dedicated Scatter Plot Analysis (HDF):**
-  **HDF (Heat Dissipation Failure):** A focused scatter plot of `Process temperature` vs. `Air temperature` isolates thermal failure points. HDF triggers almost          exclusively when the temperature differential ($\Delta T = T_{\text{process}} - T_{\text{air}}$) falls below critical dissipation limits under elevated ambient         temperatures.
+  
