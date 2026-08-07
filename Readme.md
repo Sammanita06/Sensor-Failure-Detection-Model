@@ -96,3 +96,19 @@
 
    #### 4. Dimensionality Reduction
    * **PCA (`n_components=0.90`):** Automatically selects the minimum number of principal components required to retain at least 90% of total feature variance across      preprocessed features.
+
+## Model Evaluation & Comparison
+   We evaluated three modeling strategies to address severe class imbalance (~4.6% failure rate) and optimize the trade-off between equipment downtime risk and false      maintenance inspection costs.
+
+
+   | Model Strategy | PCA | Failures Caught (Recall) | False Alarms (FP) | Precision (Class 1) | F1-Score | Overall Accuracy |
+   | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+   | **Logistic Regression (Baseline)** | Yes | 54 / 70 (77.1%) | 386 | 12% | 0.21 | 73.2% |
+   | **Random Forest Classifier** | No | 52 / 70 (74.3%) | **7** | **88%** | **0.81** | **98.3%** |
+   | **HistGradientBoosting (Champion)** | No | **61 / 70 (87.1%)** | 20 | 75% | **0.81** | 98.1% |
+
+   ### Key Business Insights
+   1. **Linear vs. Non-Linear Boundaries:** Logistic Regression struggled with non-linear sensor interactions, resulting in 386 false alarms. Tree ensembles resolved      this issue immediately.
+   2. **Impact of PCA Removal:** Bypassing PCA allowed tree-based split algorithms to evaluate precise physical thresholds directly on raw and engineered features         (e.g., `Power_Product` and `Overstrain_Product`).
+   3. **Model Selection:** **HistGradientBoosting** was selected as the final production model because it minimizes undetected machine failures (catching 87.1% of real    failures) while maintaining a high 75% precision.
+   
