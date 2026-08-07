@@ -75,3 +75,24 @@
    ![Feature Correlations Across Failure Modes Heatmap](correlation_heatmap.png)
 
   
+   ###  Data Preprocessing & Feature Engineering Pipeline
+
+   To prevent data leakage, all feature transformations are encapsulated into a scikit-learn `Pipeline` and `ColumnTransformer` fitted exclusively on training data.
+
+   #### 1. Data Splitting
+   * **Stratified 70/30 Split** Applied `train_test_split(stratify=Y)` to preserve the severe class imbalance (~4.6% failure rate) consistently across training              (`x_train`) and testing (`x_test`) sets.
+
+   #### 2. Custom Outlier Management
+   * **`IQROutlierClipper`:** Built a custom scikit-learn transformer (`BaseEstimator`, `TransformerMixin`) that computes feature lower/upper bounds ($Q_1 - 1.5 \times      \text{IQR}$, $Q_3 + 1.5 \times \text{IQR}$) during `.fit()` and caps extreme values during `.transform()`.
+
+   #### 3. Dual-Branch Feature Transformations
+   Features are split and processed through dedicated sub-pipelines before merging:
+   * **Numeric Sub-pipeline** (`KNNImputer` $\rightarrow$ `IQROutlierClipper` $\rightarrow$ `StandardScaler`)
+   * **Features:** Raw sensor readings (`Air temperature`, `Process temperature`, `Rotational speed`, `Torque`, `Tool wear`) and domain-engineered features                (`Temperature_Difference`, `Power_Product`, `Overstrain_Product`).
+   * **Processing:** Imputes missing values using 5 nearest neighbors, caps extreme outliers, and standardizes features to zero mean and unit variance.
+   * **Ordinal Sub-pipeline** (`OrdinalEncoder`)
+   * **Features:** Machine product type (`Type`).
+   * **Processing:** Maps quality variants directly into ordered ranks (`L` $\rightarrow$ 0, `M` $\rightarrow$ 1, `H` $\rightarrow$ 2).
+
+   #### 4. Dimensionality Reduction
+   * **PCA (`n_components=0.90`):** Automatically selects the minimum number of principal components required to retain at least 90% of total feature variance across      preprocessed features.
