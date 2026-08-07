@@ -97,7 +97,7 @@
    #### 4. Dimensionality Reduction
    * **PCA (`n_components=0.90`):** Automatically selects the minimum number of principal components required to retain at least 90% of total feature variance across      preprocessed features.
 
-## Model Evaluation & Comparison
+ ## Model Evaluation & Comparison
    We evaluated three modeling strategies to address severe class imbalance (~4.6% failure rate) and optimize the trade-off between equipment downtime risk and false      maintenance inspection costs.
 
 
