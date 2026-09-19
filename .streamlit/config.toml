@@ -7,6 +7,6 @@ font = "sans serif"
 
 [server]
 headless = true
-enableCORS = true
-enableXsrfProtection = true
-allowedHosts = ["localhost", "127.0.0.1"]
+enableCORS = false
+enableXsrfProtection = false
+allowedHosts = ["*"]
