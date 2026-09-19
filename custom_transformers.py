@@ -15,39 +15,27 @@ class MaintenanceFeatureEngineer(BaseEstimator, TransformerMixin):
 
         X = X.copy()
 
-        # 1. Temperature Difference & Ratio
+        # Fill missing values if present
+        if 'Air temperature [K]' in X.columns and X['Air temperature [K]'].isna().sum() > 0:
+            X['Air temperature [K]'] = X['Air temperature [K]'].fillna(X['Air temperature [K]'].mean())
+
+        # Temperature Difference
         if 'Process temperature [K]' in X.columns and 'Air temperature [K]' in X.columns:
             X['Temperature_Difference'] = X['Process temperature [K]'] - X['Air temperature [K]']
-            X['Temp_Ratio'] = X['Process temperature [K]'] / (X['Air temperature [K]'] + 1e-6)
-        elif 'Process temperature K' in X.columns and 'Air temperature K' in X.columns:
-            X['Temperature_Difference'] = X['Process temperature K'] - X['Air temperature K']
-            X['Temp_Ratio'] = X['Process temperature K'] / (X['Air temperature K'] + 1e-6)
         else:
             X['Temperature_Difference'] = 0.0
-            X['Temp_Ratio'] = 0.0
 
-        # 2. Power Proxy & Strain Ratio
+        # Power Product
         if 'Rotational speed [rpm]' in X.columns and 'Torque [Nm]' in X.columns:
-            X['Power_Proxy'] = X['Torque [Nm]'] * X['Rotational speed [rpm]']
-            X['Strain_Ratio'] = X['Torque [Nm]'] / (X['Rotational speed [rpm]'] + 1e-6)
-        elif 'Rotational speed rpm' in X.columns and 'Torque Nm' in X.columns:
-            X['Power_Proxy'] = X['Torque Nm'] * X['Rotational speed rpm']
-            X['Strain_Ratio'] = X['Torque Nm'] / (X['Rotational speed rpm'] + 1e-6)
+            X['Power_Product'] = X['Torque [Nm]'] * X['Rotational speed [rpm]']
         else:
-            X['Power_Proxy'] = 0.0
-            X['Strain_Ratio'] = 0.0
+            X['Power_Product'] = 0.0
 
-        # 3. Power to Wear Ratio
-        if 'Power_Proxy' in X.columns and 'Tool wear [min]' in X.columns:
-            X['Power_To_Wear_Ratio'] = X['Power_Proxy'] / (X['Tool wear [min]'] + 1e-6)
+        # Overstrain Product
+        if 'Torque [Nm]' in X.columns and 'Tool wear [min]' in X.columns:
+            X['Overstrain_Product'] = X['Torque [Nm]'] * X['Tool wear [min]']
         else:
-            X['Power_To_Wear_Ratio'] = 0.0
-
-        # 4. Thermal-Wear Interaction
-        if 'Temp_Ratio' in X.columns and 'Tool wear [min]' in X.columns:
-            X['Thermal_Wear_Interaction'] = X['Temp_Ratio'] * X['Tool wear [min]']
-        else:
-            X['Thermal_Wear_Interaction'] = 0.0
+            X['Overstrain_Product'] = 0.0
 
         return X
 
