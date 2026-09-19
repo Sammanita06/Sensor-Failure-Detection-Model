@@ -1,27 +1,28 @@
 import numpy as np
 import pandas as pd
-from sklearn.base import BaseEstimator, TransformerMixin, OneToOneFeatureMixin
+from sklearn.base import BaseEstimator, TransformerMixin
 
 class MaintenanceFeatureEngineer(BaseEstimator, TransformerMixin):
+    """
+    Custom transformer to engineer domain-specific features for predictive maintenance.
+    """
     def __init__(self):
-        pass
+        self.required_cols = [
+            'Air temperature [K]', 
+            'Process temperature [K]', 
+            'Rotational speed [rpm]', 
+            'Torque [Nm]', 
+            'Tool wear [min]'
+        ]
 
     def fit(self, X, y=None):
-        if isinstance(X, pd.DataFrame):
-            self.feature_names_in_ = np.array(X.columns, dtype=object)
-        elif hasattr(X, "shape"):
-            self.feature_names_in_ = np.array([f"x{i}" for i in range(X.shape[1])], dtype=object)
-        else:
-            self.feature_names_in_ = np.array([], dtype=object)
-        self.n_features_in_ = len(self.feature_names_in_)
         return self
 
     def transform(self, X):
         if isinstance(X, pd.DataFrame):
             X_df = X.copy()
         else:
-            cols = getattr(self, "feature_names_in_", [f"x{i}" for i in range(X.shape[1])])
-            X_df = pd.DataFrame(X, columns=cols).copy()
+            X_df = pd.DataFrame(X).copy()
 
         if 'Process temperature [K]' in X_df.columns and 'Air temperature [K]' in X_df.columns:
             X_df['Temperature_Difference'] = X_df['Process temperature [K]'] - X_df['Air temperature [K]']
@@ -32,32 +33,25 @@ class MaintenanceFeatureEngineer(BaseEstimator, TransformerMixin):
         if 'Tool wear [min]' in X_df.columns and 'Torque [Nm]' in X_df.columns:
             X_df['Overstrain_Product'] = X_df['Tool wear [min]'] * X_df['Torque [Nm]']
 
-        # Cache exact column names generated during the last transform pass
-        self.last_columns_out_ = np.array(X_df.columns, dtype=object)
         return X_df
 
     def get_feature_names_out(self, input_features=None):
-        # 1. If transformed recently, return exact output columns
-        if hasattr(self, "last_columns_out_"):
-            return self.last_columns_out_
+        """Passes through input feature names and appends newly engineered column names."""
+        if input_features is None:
+            return None
 
-        # 2. Derive dynamically from input_features or saved feature_names_in_
-        if input_features is not None:
-            base_names = list(input_features)
-        elif hasattr(self, "feature_names_in_"):
-            base_names = list(self.feature_names_in_)
-        else:
-            base_names = []
-
+        feature_names = list(input_features)
         new_cols = ['Temperature_Difference', 'Power_Product', 'Overstrain_Product']
         for col in new_cols:
-            if col not in base_names:
-                base_names.append(col)
+            if col not in feature_names:
+                feature_names.append(col)
+        return np.array(feature_names, dtype=object)
 
-        return np.array(base_names, dtype=object)
 
-
-class IQROutlierClipper(OneToOneFeatureMixin, BaseEstimator, TransformerMixin):
+class IQROutlierClipper(BaseEstimator, TransformerMixin):
+    """
+    Custom transformer to clip extreme numerical outliers based on IQR.
+    """
     def __init__(self, factor=1.5):
         self.factor = factor
         self.lower_bounds_ = {}
@@ -65,7 +59,6 @@ class IQROutlierClipper(OneToOneFeatureMixin, BaseEstimator, TransformerMixin):
 
     def fit(self, X, y=None):
         if isinstance(X, pd.DataFrame):
-            self.feature_names_in_ = np.array(X.columns, dtype=object)
             for col in X.select_dtypes(include=[np.number]).columns:
                 q25 = X[col].quantile(0.25)
                 q75 = X[col].quantile(0.75)
@@ -73,14 +66,12 @@ class IQROutlierClipper(OneToOneFeatureMixin, BaseEstimator, TransformerMixin):
                 self.lower_bounds_[col] = float(q25 - (self.factor * iqr))
                 self.upper_bounds_[col] = float(q75 + (self.factor * iqr))
         elif isinstance(X, np.ndarray):
-            self.feature_names_in_ = np.array([f"x{i}" for i in range(X.shape[1])], dtype=object)
             for idx in range(X.shape[1]):
                 q25 = np.percentile(X[:, idx], 25)
                 q75 = np.percentile(X[:, idx], 75)
                 iqr = q75 - q25
                 self.lower_bounds_[idx] = float(q25 - (self.factor * iqr))
                 self.upper_bounds_[idx] = float(q75 + (self.factor * iqr))
-        self.n_features_in_ = len(self.feature_names_in_)
         return self
 
     def transform(self, X):
@@ -99,3 +90,9 @@ class IQROutlierClipper(OneToOneFeatureMixin, BaseEstimator, TransformerMixin):
                     X_arr[:, idx] = np.clip(X_arr[:, idx], lower, upper)
             return X_arr
         return X
+
+    def get_feature_names_out(self, input_features=None):
+        """Passes through input feature names without modification."""
+        if input_features is None:
+            return None
+        return np.asarray(input_features, dtype=object)

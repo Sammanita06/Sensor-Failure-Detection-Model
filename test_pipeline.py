@@ -18,13 +18,13 @@ def test_custom_transformers():
     print("✅ Custom transformers working as expected.")
 
 def test_pipeline_loading():
-    model_path = 'predictive_maintenance_pipeline.joblib'
+    model_path = 'model_store/production_v1.joblib'
     if os.path.exists(model_path):
         payload = joblib.load(model_path)
         assert payload is not None, "Pipeline payload loaded as None."
         print("✅ Pipeline payload loaded successfully.")
     else:
-        print("⚠️ Model file 'predictive_maintenance_pipeline.joblib' not found. Skipping file existence check for CI.")
+        print("⚠️ Model file 'model_store/production_v1.joblib' not found. Skipping file existence check for CI.")
 
 if __name__ == "__main__":
     test_custom_transformers()
