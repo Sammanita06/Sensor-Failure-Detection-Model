@@ -24,6 +24,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Run Import Tests
+    - name: Run Pipeline Integration Tests
       run: |
-        python -c "import custom_transformers, app; print('Imports successful!')"
+        python test_pipeline.py
