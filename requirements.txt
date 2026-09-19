@@ -10,3 +10,4 @@ xgboost
 pytest
 pytest-cov
 flake8
+shap
