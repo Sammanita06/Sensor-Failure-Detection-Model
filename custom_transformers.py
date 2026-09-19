@@ -10,21 +10,29 @@ class MaintenanceFeatureEngineer(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):
-        if not isinstance(X, pd.DataFrame):
-            X = pd.DataFrame(X)
+        if isinstance(X, np.ndarray):
+            return X
 
         X = X.copy()
 
-        # 1. Temperature Ratio
+        # 1. Temperature Difference & Ratio
         if 'Process temperature [K]' in X.columns and 'Air temperature [K]' in X.columns:
+            X['Temperature_Difference'] = X['Process temperature [K]'] - X['Air temperature [K]']
             X['Temp_Ratio'] = X['Process temperature [K]'] / (X['Air temperature [K]'] + 1e-6)
+        elif 'Process temperature K' in X.columns and 'Air temperature K' in X.columns:
+            X['Temperature_Difference'] = X['Process temperature K'] - X['Air temperature K']
+            X['Temp_Ratio'] = X['Process temperature K'] / (X['Air temperature K'] + 1e-6)
         else:
+            X['Temperature_Difference'] = 0.0
             X['Temp_Ratio'] = 0.0
 
         # 2. Power Proxy & Strain Ratio
         if 'Rotational speed [rpm]' in X.columns and 'Torque [Nm]' in X.columns:
             X['Power_Proxy'] = X['Torque [Nm]'] * X['Rotational speed [rpm]']
             X['Strain_Ratio'] = X['Torque [Nm]'] / (X['Rotational speed [rpm]'] + 1e-6)
+        elif 'Rotational speed rpm' in X.columns and 'Torque Nm' in X.columns:
+            X['Power_Proxy'] = X['Torque Nm'] * X['Rotational speed rpm']
+            X['Strain_Ratio'] = X['Torque Nm'] / (X['Rotational speed rpm'] + 1e-6)
         else:
             X['Power_Proxy'] = 0.0
             X['Strain_Ratio'] = 0.0
@@ -42,6 +50,7 @@ class MaintenanceFeatureEngineer(BaseEstimator, TransformerMixin):
             X['Thermal_Wear_Interaction'] = 0.0
 
         return X
+
 
 class IQROutlierClipper(BaseEstimator, TransformerMixin):
     def __init__(self, factor=1.5):
