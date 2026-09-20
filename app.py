@@ -52,20 +52,30 @@ from retrain_module import execute_tier2_retrain
 from logger_db import fetch_historical_logs, log_batch_execution
 
 # -----------------------------------------------------------------------------
-# CUSTOM UNPICKLER OVERRIDE
+# CUSTOM UNPICKLER OVERRIDE (ROBUST MODULE MAPPER)
 # -----------------------------------------------------------------------------
 class SafeCustomUnpickler(pickle.Unpickler):
-    """Custom unpickler that intercepts missing class path lookups during deserialization."""
+    """Custom unpickler that intercepts and resolves custom transformer lookup failures."""
+    
+    TARGET_CLASSES = {
+        "IQROutlierClipper": IQROutlierClipper,
+        "MaintenanceFeatureEngineer": MaintenanceFeatureEngineer
+    }
+
     def find_class(self, module, name):
-        if name in ["IQROutlierClipper", "MaintenanceFeatureEngineer"]:
-            return globals()[name]
+        # 1. Direct interception for custom classes to prevent ModuleNotFoundError on import attempt
+        if name in self.TARGET_CLASSES:
+            return self.TARGET_CLASSES[name]
+            
         try:
             return super().find_class(module, name)
-        except (ImportError, AttributeError):
+        except (ImportError, AttributeError, ModuleNotFoundError):
             if hasattr(custom_transformers, name):
                 return getattr(custom_transformers, name)
             if hasattr(__main__, name):
                 return getattr(__main__, name)
+            if name in globals():
+                return globals()[name]
             raise
 
 # -----------------------------------------------------------------------------
@@ -203,7 +213,7 @@ st.markdown(
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def load_model_payload():
-    # 1. Primary path matching root repo structure from screenshot
+    # 1. Primary path matching root repo structure
     model_path = os.path.join(app_dir, 'predictive_maintenance_pipeline.joblib')
     
     # 2. Fallback check for alternative folder pathing
@@ -211,15 +221,16 @@ def load_model_payload():
         model_path = os.path.join(app_dir, 'model_store', 'production_v1.joblib')
         
     if not os.path.exists(model_path):
-        st.error(f"❌ Model payload not found. Please verify 'predictive_maintenance_pipeline.joblib' exists in root.")
+        st.error("❌ Model payload not found. Please verify 'predictive_maintenance_pipeline.joblib' exists in root.")
         st.stop()
     
     try:
-        payload = joblib.load(model_path)
-    except (ImportError, AttributeError, ModuleNotFoundError):
-        # Fallback to custom safe unpickler if standard module resolution fails
+        # Try custom unpickler directly first to ensure custom module mapping is honored
         with open(model_path, 'rb') as f:
             payload = SafeCustomUnpickler(f).load()
+    except Exception:
+        # Secondary fallback to joblib load
+        payload = joblib.load(model_path)
             
     return payload
 
