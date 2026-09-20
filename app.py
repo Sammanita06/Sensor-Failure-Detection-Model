@@ -229,7 +229,7 @@ def load_model_payload():
         model_path = os.path.join(app_dir, 'model_store', 'production_v1.joblib')
         
     if not os.path.exists(model_path):
-        st.error("❌ Model payload not found. Please verify 'predictive_maintenance_pipeline.joblib' exists in root.")
+        st.error("❌ Model payload not found. Please verify 'predictive_maintenance_pipeline.joblib' exists in root or 'model_store/production_v1.joblib'.")
         st.stop()
     
     # Try custom unpickler first
@@ -257,12 +257,14 @@ if isinstance(payload, dict):
     drift_tolerance_f1 = payload.get('drift_tolerance_f1', 0.8000)
     baseline_metrics = payload.get('baseline_metrics', {})
     feature_importance_df = payload.get('feature_importances', None)
+    feature_names_list = payload.get('feature_names', None)
 else:
     pipeline = payload
     tier1_threshold = 0.8900
     tier2_threshold = 0.5000
     drift_tolerance_f1 = 0.8000
     feature_importance_df = None
+    feature_names_list = None
 
 # -----------------------------------------------------------------------------
 # SIDEBAR CONTROL PANEL
@@ -297,7 +299,7 @@ with hero_left:
 with hero_right:
     with st.container(border=True):
         st.caption("SYSTEM METADATA")
-        st.markdown("`ENGINE:` Random Forest Pipeline")
+        st.markdown("`ENGINE:` Random Forest / HGB Pipeline")
         st.markdown("`INGESTION:` 6-Vector Sensor Stream")
         st.markdown("`INFERENCE:` Two-Tier Adaptive Guard")
 
@@ -372,18 +374,23 @@ with tab1:
                 st.subheader("Local Model Explanation (SHAP Waterfall)")
                 try:
                     preprocessor = pipeline.named_steps['preprocessor']
-                    feature_engineer = pipeline.named_steps.get('feature_engineer', None)
                     classifier = pipeline.named_steps['classifier']
 
-                    if feature_engineer:
-                        x_engineered = feature_engineer.transform(input_df)
-                    else:
-                        x_engineered = input_df.copy()
+                    # Transform features through pipeline steps safely
+                    x_trans = preprocessor.transform(input_df)
 
-                    x_trans = preprocessor.transform(x_engineered)
+                    # Wrap in DataFrame if numpy output is returned
+                    if not isinstance(x_trans, pd.DataFrame):
+                        cols = feature_names_list if feature_names_list else [f"feature_{i}" for i in range(x_trans.shape[1])]
+                        x_trans = pd.DataFrame(x_trans, columns=cols)
 
                     explainer = shap.Explainer(classifier)
                     shap_values = explainer(x_trans)
+
+                    # Slice single instance & class 1 index if multi-dimensional
+                    single_shap = shap_values[0]
+                    if len(single_shap.shape) > 1 and single_shap.shape[-1] == 2:
+                        single_shap = single_shap[:, 1]
 
                     fig, ax = plt.subplots(figsize=(8, 4), facecolor='#1e293b')
                     ax.set_facecolor('#1e293b')
@@ -392,7 +399,7 @@ with tab1:
                     plt.rcParams['xtick.color'] = '#f8fafc'
                     plt.rcParams['ytick.color'] = '#f8fafc'
                     
-                    shap.plots.waterfall(shap_values[0], show=False)
+                    shap.plots.waterfall(single_shap, show=False)
                     st.pyplot(fig)
                 except Exception as e:
                     st.info(f"SHAP local breakdown unavailable for this configuration: {e}")
@@ -557,7 +564,7 @@ with tab3:
         st.info("💡 Feature importance metrics not detected in model payload.")
 
 # -----------------------------------------------------------------------------
-# TAB 4: MLOPS MODEL DECAY TIMELINE
+# TAB 4: MLOps MODEL DECAY TIMELINE
 # -----------------------------------------------------------------------------
 with tab4:
     st.header("📈 Model Decay & Operational Audit Trail")
