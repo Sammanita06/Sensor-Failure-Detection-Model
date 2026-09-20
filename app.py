@@ -15,26 +15,39 @@ cwd = os.getcwd()
 if cwd not in sys.path:
     sys.path.insert(0, cwd)
 
-# Import custom transformers
+# Import custom transformers with dual-module fallback support
+IQROutlierClipper = None
+MaintenanceFeatureEngineer = None
+
+# Attempt 1: Import from custom_transformers
 try:
     import custom_transformers
-    from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
+    IQROutlierClipper = getattr(custom_transformers, "IQROutlierClipper", None)
+    MaintenanceFeatureEngineer = getattr(custom_transformers, "MaintenanceFeatureEngineer", None)
 except ImportError:
-    # Build dynamic fallback module if pathing fails during Cloud initialization
     custom_transformers = types.ModuleType("custom_transformers")
     sys.modules["custom_transformers"] = custom_transformers
-    from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
+
+# Attempt 2: Import from custom_transformer
+try:
+    import custom_transformer
+    if IQROutlierClipper is None:
+        IQROutlierClipper = getattr(custom_transformer, "IQROutlierClipper", None)
+    if MaintenanceFeatureEngineer is None:
+        MaintenanceFeatureEngineer = getattr(custom_transformer, "MaintenanceFeatureEngineer", None)
+except ImportError:
+    custom_transformer = types.ModuleType("custom_transformer")
+    sys.modules["custom_transformer"] = custom_transformer
 
 # Register classes across all potential pickle import namespaces
 import __main__
-setattr(__main__, "IQROutlierClipper", IQROutlierClipper)
-setattr(__main__, "MaintenanceFeatureEngineer", MaintenanceFeatureEngineer)
 
-setattr(sys.modules["custom_transformers"], "IQROutlierClipper", IQROutlierClipper)
-setattr(sys.modules["custom_transformers"], "MaintenanceFeatureEngineer", MaintenanceFeatureEngineer)
-
-sys.modules["IQROutlierClipper"] = IQROutlierClipper
-sys.modules["MaintenanceFeatureEngineer"] = MaintenanceFeatureEngineer
+for cls_name, cls_obj in [("IQROutlierClipper", IQROutlierClipper), ("MaintenanceFeatureEngineer", MaintenanceFeatureEngineer)]:
+    if cls_obj is not None:
+        setattr(__main__, cls_name, cls_obj)
+        setattr(sys.modules["custom_transformers"], cls_name, cls_obj)
+        setattr(sys.modules["custom_transformer"], cls_name, cls_obj)
+        sys.modules[cls_name] = cls_obj
 
 import joblib
 import matplotlib.pyplot as plt
@@ -64,7 +77,7 @@ class SafeCustomUnpickler(pickle.Unpickler):
 
     def find_class(self, module, name):
         # 1. Immediate direct mapping check (bypasses module import completely)
-        if name in self.TARGET_CLASSES:
+        if name in self.TARGET_CLASSES and self.TARGET_CLASSES[name] is not None:
             return self.TARGET_CLASSES[name]
             
         # 2. Safe execution of standard resolution with Python 3.14 error trapping
@@ -73,6 +86,8 @@ class SafeCustomUnpickler(pickle.Unpickler):
         except (ImportError, AttributeError, ModuleNotFoundError, Exception):
             if hasattr(custom_transformers, name):
                 return getattr(custom_transformers, name)
+            if hasattr(custom_transformer, name):
+                return getattr(custom_transformer, name)
             if hasattr(__main__, name):
                 return getattr(__main__, name)
             if name in globals():
@@ -82,13 +97,15 @@ class SafeCustomUnpickler(pickle.Unpickler):
 # Inject SafeCustomUnpickler into Joblib's unpickler stack
 class SafeJoblibUnpickler(joblib.numpy_pickle.NumpyUnpickler):
     def find_class(self, module, name):
-        if name in SafeCustomUnpickler.TARGET_CLASSES:
+        if name in SafeCustomUnpickler.TARGET_CLASSES and SafeCustomUnpickler.TARGET_CLASSES[name] is not None:
             return SafeCustomUnpickler.TARGET_CLASSES[name]
         try:
             return super().find_class(module, name)
         except (ImportError, AttributeError, ModuleNotFoundError, Exception):
             if hasattr(custom_transformers, name):
                 return getattr(custom_transformers, name)
+            if hasattr(custom_transformer, name):
+                return getattr(custom_transformer, name)
             if hasattr(__main__, name):
                 return getattr(__main__, name)
             if name in globals():
