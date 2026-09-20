@@ -2,6 +2,7 @@ import os
 import sys
 import types
 import io
+import pickle
 
 # -----------------------------------------------------------------------------
 # PATH & MODULE INJECTION FIX FOR STREAMLIT CLOUD / JOBLIB UNPICKLING
@@ -53,7 +54,7 @@ from logger_db import fetch_historical_logs, log_batch_execution
 # -----------------------------------------------------------------------------
 # CUSTOM UNPICKLER OVERRIDE
 # -----------------------------------------------------------------------------
-class SafeCustomUnpickler(joblib.Unpickler):
+class SafeCustomUnpickler(pickle.Unpickler):
     """Custom unpickler that intercepts missing class path lookups during deserialization."""
     def find_class(self, module, name):
         if name in ["IQROutlierClipper", "MaintenanceFeatureEngineer"]:
