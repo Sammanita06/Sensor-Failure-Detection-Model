@@ -29,7 +29,15 @@ except ImportError:
         
     class MaintenanceFeatureEngineer:
         def fit(self, X, y=None): return self
-        def transform(self, X): return X
+        def transform(self, X): 
+            X = X.copy()
+            if 'Air temperature [K]' in X.columns and 'Process temperature [K]' in X.columns:
+                X['Temperature_Difference'] = X['Process temperature [K]'] - X['Air temperature [K]']
+            if 'Torque [Nm]' in X.columns and 'Rotational speed [rpm]' in X.columns:
+                X['Power_Index'] = X['Torque [Nm]'] * X['Rotational speed [rpm]']
+            if 'Tool wear [min]' in X.columns and 'Torque [Nm]' in X.columns:
+                X['Wear_Torque_Ratio'] = X['Tool wear [min]'] * X['Torque [Nm]']
+            return X
         
     custom_transformers.IQROutlierClipper = IQROutlierClipper
     custom_transformers.MaintenanceFeatureEngineer = MaintenanceFeatureEngineer
@@ -81,10 +89,9 @@ except ImportError:
         pass
 
 # -----------------------------------------------------------------------------
-# 2. CUSTOM UNPICKLER OVERRIDE (PYTHON 3.14 + JOBLIB COMPATIBLE)
+# 2. CUSTOM UNPICKLER OVERRIDE
 # -----------------------------------------------------------------------------
 class SafeCustomUnpickler(pickle.Unpickler):
-    """Custom unpickler that intercepts target classes before module resolution."""
     TARGET_CLASSES = {
         "IQROutlierClipper": IQROutlierClipper,
         "MaintenanceFeatureEngineer": MaintenanceFeatureEngineer
@@ -95,7 +102,7 @@ class SafeCustomUnpickler(pickle.Unpickler):
             return self.TARGET_CLASSES[name]
         try:
             return super().find_class(module, name)
-        except (ImportError, AttributeError, ModuleNotFoundError, Exception):
+        except Exception:
             if hasattr(custom_transformers, name):
                 return getattr(custom_transformers, name)
             if hasattr(__main__, name):
@@ -110,7 +117,7 @@ class SafeJoblibUnpickler(joblib.numpy_pickle.NumpyUnpickler):
             return SafeCustomUnpickler.TARGET_CLASSES[name]
         try:
             return super().find_class(module, name)
-        except (ImportError, AttributeError, ModuleNotFoundError, Exception):
+        except Exception:
             if hasattr(custom_transformers, name):
                 return getattr(custom_transformers, name)
             if hasattr(__main__, name):
@@ -120,7 +127,7 @@ class SafeJoblibUnpickler(joblib.numpy_pickle.NumpyUnpickler):
             raise
 
 # -----------------------------------------------------------------------------
-# 3. PAGE CONFIGURATION & DEEP NAVY BLUE / GRID CSS
+# 3. PAGE CONFIGURATION & STYLING
 # -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="Industrial Machinery Diagnostics & Telemetry",
@@ -183,11 +190,6 @@ st.markdown(
         border-bottom: none;
         transition: all 0.2s ease-in-out;
     }
-    
-    .stTabs [data-baseweb="tab"]:hover {
-        background-color: #334155;
-        color: #f8fafc !important;
-    }
 
     .stTabs [aria-selected="true"] {
         background-color: #1e293b !important;
@@ -207,11 +209,6 @@ st.markdown(
         border-radius: 8px !important;
     }
 
-    div[data-baseweb="select"] * {
-        color: #f8fafc !important;
-        background-color: #0f172a !important;
-    }
-
     .stButton > button {
         background-color: #0284c7;
         color: #ffffff !important;
@@ -219,12 +216,6 @@ st.markdown(
         border-radius: 8px;
         border: 1px solid #38bdf8;
         padding: 0.6rem 1.4rem;
-        transition: all 0.2s ease;
-    }
-    
-    .stButton > button:hover {
-        background-color: #0369a1;
-        box-shadow: 0px 0px 14px rgba(56, 189, 248, 0.4);
     }
 
     div[data-testid="stMetricValue"] {
@@ -243,7 +234,7 @@ st.markdown(
 )
 
 # -----------------------------------------------------------------------------
-# 4. LOAD MODEL PIPELINE & TWO-TIER PAYLOAD
+# 4. LOAD MODEL PIPELINE & PAYLOAD
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def load_model_payload():
@@ -260,29 +251,25 @@ def load_model_payload():
             break
             
     if not model_path:
-        st.error("❌ Model payload not found. Please verify 'predictive_maintenance_pipeline.joblib' exists in your root folder.")
+        st.error("❌ Model payload not found. Please verify 'predictive_maintenance_pipeline.joblib' exists.")
         st.stop()
     
-    # Try SafeCustomUnpickler
     try:
         with open(model_path, 'rb') as f:
             return SafeCustomUnpickler(f).load()
     except Exception:
         pass
 
-    # Try SafeJoblibUnpickler
     try:
         with open(model_path, 'rb') as f:
             return SafeJoblibUnpickler(model_path, f).load()
     except Exception:
         pass
 
-    # Final fallback
     return joblib.load(model_path)
 
 payload = load_model_payload()
 
-# Extract model components
 if isinstance(payload, dict):
     pipeline = payload.get('pipeline', payload.get('model'))
     tier1_threshold = float(payload.get('tier1_threshold', 0.8900))
@@ -297,25 +284,55 @@ else:
     drift_tolerance_f1 = 0.8000
     feature_importance_df = None
 
-# Helper function to perform robust prediction regardless of feature engineering placement
+# Helper function to extract required columns from ColumnTransformer safely
+def get_expected_columns(model_pipeline):
+    """Retrieves list of expected input columns by inspecting ColumnTransformer steps."""
+    expected = []
+    if hasattr(model_pipeline, 'named_steps'):
+        preprocessor = model_pipeline.named_steps.get('preprocessor', None)
+        if preprocessor and hasattr(preprocessor, 'transformers_'):
+            for name, trans, cols in preprocessor.transformers_:
+                if name != 'remainder' and isinstance(cols, (list, tuple, pd.Index, np.ndarray)):
+                    expected.extend(list(cols))
+    return list(set(expected))
+
+# Robust, column-safe prediction wrapper
 def safe_predict_proba(model_pipeline, df_input):
-    """Passes input through feature engineering explicitly if missing in primary dataframe."""
-    df_transformed = df_input.copy()
+    """
+    Safely executes prediction while handling missing columns required by downstream transformers.
+    """
+    df_eval = df_input.copy()
+    
     try:
-        # Check if feature engineer transformer is inside named_steps
-        if hasattr(model_pipeline, 'named_steps'):
-            fe_step = model_pipeline.named_steps.get('feature_engineer', None)
-            if fe_step and hasattr(fe_step, 'transform'):
-                df_transformed = fe_step.transform(df_transformed)
-        return model_pipeline.predict_proba(df_input)
+        # Standard direct pipeline evaluation
+        return model_pipeline.predict_proba(df_eval)
     except ValueError as err:
-        # Fallback: manually engineer features and attempt prediction again
-        try:
-            fe = MaintenanceFeatureEngineer()
-            df_transformed = fe.transform(df_input)
-            return model_pipeline.predict_proba(df_transformed)
-        except Exception:
-            raise err
+        err_msg = str(err)
+        if "columns are missing" in err_msg:
+            # Dynamically extract missing columns and patch them
+            expected_cols = get_expected_columns(model_pipeline)
+            
+            # Step 1: Run feature engineer transformer if available
+            if hasattr(model_pipeline, 'named_steps'):
+                fe_step = model_pipeline.named_steps.get('feature_engineer', None)
+                if fe_step and hasattr(fe_step, 'transform'):
+                    df_eval = fe_step.transform(df_eval)
+
+            # Step 2: Backfill any missing expected columns with zeros
+            for col in expected_cols:
+                if col not in df_eval.columns:
+                    df_eval[col] = 0.0
+
+            # Step 3: Run pipeline without the feature_engineer step if already applied, or fit schema
+            if hasattr(model_pipeline, 'named_steps') and 'preprocessor' in model_pipeline.named_steps:
+                preprocessor = model_pipeline.named_steps['preprocessor']
+                classifier = model_pipeline.named_steps.get('classifier', list(model_pipeline.named_steps.values())[-1])
+                
+                # Transform via preprocessor directly and predict
+                X_trans = preprocessor.transform(df_eval)
+                return classifier.predict_proba(X_trans)
+
+        raise err
 
 # -----------------------------------------------------------------------------
 # 5. SIDEBAR CONTROL PANEL
@@ -430,6 +447,13 @@ with tab1:
                     classifier = named_steps.get('classifier', list(named_steps.values())[-1] if named_steps else pipeline)
 
                     x_engineered = feature_engineer.transform(input_df) if feature_engineer else input_df.copy()
+                    
+                    # Ensure engineered columns match preprocessor
+                    expected_cols = get_expected_columns(pipeline)
+                    for col in expected_cols:
+                        if col not in x_engineered.columns:
+                            x_engineered[col] = 0.0
+
                     x_trans = preprocessor.transform(x_engineered) if preprocessor else x_engineered
 
                     explainer = shap.Explainer(classifier)
@@ -446,7 +470,7 @@ with tab1:
                     st.pyplot(fig)
                     plt.close(fig)
                 except Exception as e:
-                    st.info(f"SHAP local breakdown unavailable for this configuration: {e}")
+                    st.info(f"SHAP local breakdown notice: {e}")
 
 # -----------------------------------------------------------------------------
 # TAB 2: BATCH PREDICTIONS & DRIFT MONITORING
@@ -497,41 +521,6 @@ with tab2:
                 col1.metric("Batch F1-Score", f"{results['metrics'].get('f1', 0.0):.4f}")
                 col2.metric("Batch Precision", f"{results['metrics'].get('precision', 0.0):.4f}")
                 col3.metric("Batch Recall", f"{results['metrics'].get('recall', 0.0):.4f}")
-
-            with st.expander("📊 View Live Feature Importance Spectrum (Ingested Batch)"):
-                try:
-                    X_batch = batch_df.drop(columns=['Machine failure', 'Product ID', 'UDI'], errors='ignore')
-                    if 'Machine failure' in batch_df.columns:
-                        y_batch = batch_df['Machine failure']
-                        perm_result = permutation_importance(
-                            pipeline, X_batch, y_batch, scoring='f1', n_repeats=3, random_state=42
-                        )
-                        batch_importance_df = pd.DataFrame({
-                            'Feature': X_batch.columns,
-                            'Importance': perm_result.importances_mean
-                        }).sort_values(by='Importance', ascending=False)
-
-                        fig_batch = px.bar(
-                            batch_importance_df,
-                            x='Importance',
-                            y='Feature',
-                            orientation='h',
-                            title='Batch Feature Importance Distribution',
-                            color='Importance',
-                            color_continuous_scale='Blues'
-                        )
-                        fig_batch.update_layout(
-                            paper_bgcolor='#1e293b',
-                            plot_bgcolor='#1e293b',
-                            font=dict(color='#f8fafc'),
-                            yaxis={'categoryorder': 'total ascending'},
-                            height=350
-                        )
-                        st.plotly_chart(fig_batch, use_container_width=True)
-                    else:
-                        st.info("Ground truth column ('Machine failure') required for batch permutation importance calculations.")
-                except Exception as err:
-                    st.info(f"Batch feature importance calculation notice: {err}")
 
         st.markdown("---")
         if drift_alert or st.button("TRIGGER TIER-2 AUTOMATED MODEL RETRAIN"):
