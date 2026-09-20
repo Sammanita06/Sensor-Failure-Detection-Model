@@ -1,5 +1,7 @@
 import os
 import sys
+import types
+import io
 
 # -----------------------------------------------------------------------------
 # PATH & MODULE INJECTION FIX FOR STREAMLIT CLOUD / JOBLIB UNPICKLING
@@ -12,24 +14,26 @@ cwd = os.getcwd()
 if cwd not in sys.path:
     sys.path.insert(0, cwd)
 
-# Import custom transformers and register across all potential unpickler namespaces
+# Import custom transformers
 try:
     import custom_transformers
     from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
+except ImportError:
+    # Build dynamic fallback module if pathing fails during Cloud initialization
+    custom_transformers = types.ModuleType("custom_transformers")
+    sys.modules["custom_transformers"] = custom_transformers
+    from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
 
-    # 1. Register under custom_transformers module namespace
-    sys.modules['custom_transformers'] = custom_transformers
-    sys.modules['custom_transformers.IQROutlierClipper'] = IQROutlierClipper
-    sys.modules['custom_transformers.MaintenanceFeatureEngineer'] = MaintenanceFeatureEngineer
+# Register classes across all potential pickle import namespaces
+import __main__
+setattr(__main__, "IQROutlierClipper", IQROutlierClipper)
+setattr(__main__, "MaintenanceFeatureEngineer", MaintenanceFeatureEngineer)
 
-    # 2. Fallback: Register under __main__ namespace if pickled during training from __main__
-    import __main__
-    setattr(__main__, 'IQROutlierClipper', IQROutlierClipper)
-    setattr(__main__, 'MaintenanceFeatureEngineer', MaintenanceFeatureEngineer)
-    sys.modules['IQROutlierClipper'] = IQROutlierClipper
-    sys.modules['MaintenanceFeatureEngineer'] = MaintenanceFeatureEngineer
-except Exception as e:
-    pass
+setattr(sys.modules["custom_transformers"], "IQROutlierClipper", IQROutlierClipper)
+setattr(sys.modules["custom_transformers"], "MaintenanceFeatureEngineer", MaintenanceFeatureEngineer)
+
+sys.modules["IQROutlierClipper"] = IQROutlierClipper
+sys.modules["MaintenanceFeatureEngineer"] = MaintenanceFeatureEngineer
 
 import joblib
 import matplotlib.pyplot as plt
@@ -47,6 +51,23 @@ from retrain_module import execute_tier2_retrain
 from logger_db import fetch_historical_logs, log_batch_execution
 
 # -----------------------------------------------------------------------------
+# CUSTOM UNPICKLER OVERRIDE
+# -----------------------------------------------------------------------------
+class SafeCustomUnpickler(joblib.Unpickler):
+    """Custom unpickler that intercepts missing class path lookups during deserialization."""
+    def find_class(self, module, name):
+        if name in ["IQROutlierClipper", "MaintenanceFeatureEngineer"]:
+            return globals()[name]
+        try:
+            return super().find_class(module, name)
+        except (ImportError, AttributeError):
+            if hasattr(custom_transformers, name):
+                return getattr(custom_transformers, name)
+            if hasattr(__main__, name):
+                return getattr(__main__, name)
+            raise
+
+# -----------------------------------------------------------------------------
 # PAGE CONFIGURATION & DEEP NAVY BLUE / GRID CSS
 # -----------------------------------------------------------------------------
 st.set_page_config(
@@ -60,7 +81,7 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* 1. Dark Mode Solid & Subtle Tech Grid Pattern */
+    /* Dark Mode Solid & Subtle Tech Grid Pattern */
     .stApp {
         background-color: #0f172a;
         background-image: radial-gradient(rgba(56, 189, 248, 0.07) 1px, transparent 0);
@@ -68,7 +89,7 @@ st.markdown(
         color: #f8fafc;
     }
 
-    /* 2. Typography & High-Contrast Readability Rules */
+    /* Typography & High-Contrast Readability Rules */
     h1, h2, h3, h4, h5, h6 {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
         font-weight: 700;
@@ -76,18 +97,16 @@ st.markdown(
         letter-spacing: -0.02em;
     }
 
-    /* Small labels, text captions, and input field headers */
     .stCaption, label, div[data-baseweb="label"], p, span {
         color: #e2e8f0 !important;
         font-weight: 500;
     }
 
-    /* Monospace accents for technical specs */
     code, .mono-text, div[data-testid="stMetricValue"] {
         font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
     }
 
-    /* 3. Card-Based Grid Container Styling */
+    /* Card-Based Grid Container Styling */
     div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column;"] {
         background: #1e293b;
         border: 1px solid #334155;
@@ -96,7 +115,7 @@ st.markdown(
         box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.35);
     }
 
-    /* 4. Production-Ready Tab Styling & Clear High-Contrast Names */
+    /* Production-Ready Tab Styling */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
         background-color: #1e293b;
@@ -123,7 +142,6 @@ st.markdown(
         color: #f8fafc !important;
     }
 
-    /* Selected Tab with Electric Blue Highlight */
     .stTabs [aria-selected="true"] {
         background-color: #1e293b !important;
         color: #38bdf8 !important;
@@ -133,7 +151,7 @@ st.markdown(
         border-bottom: 2px solid #1e293b !important;
     }
 
-    /* 5. Consistent Selectbox & Number Input Field Unified Styling */
+    /* Form Fields */
     div[data-baseweb="select"] > div, 
     div[data-baseweb="input"] > div,
     input {
@@ -143,13 +161,12 @@ st.markdown(
         border-radius: 8px !important;
     }
 
-    /* Target inner dropdown text and options list */
     div[data-baseweb="select"] * {
         color: #f8fafc !important;
         background-color: #0f172a !important;
     }
 
-    /* 6. Single Accent Color Buttons (Electric Cyan) */
+    /* Buttons */
     .stButton > button {
         background-color: #0284c7;
         color: #ffffff !important;
@@ -165,14 +182,12 @@ st.markdown(
         box-shadow: 0px 0px 14px rgba(56, 189, 248, 0.4);
     }
 
-    /* Metrics Accent */
     div[data-testid="stMetricValue"] {
         font-size: 30px;
         font-weight: 700;
         color: #38bdf8 !important;
     }
 
-    /* Sidebar Background */
     section[data-testid="stSidebar"] {
         background-color: #0b1120 !important;
         border-right: 1px solid #1e293b;
@@ -187,11 +202,24 @@ st.markdown(
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def load_model_payload():
-    model_path = os.path.join(app_dir, 'model_store', 'production_v1.joblib')
+    # 1. Primary path matching root repo structure from screenshot
+    model_path = os.path.join(app_dir, 'predictive_maintenance_pipeline.joblib')
+    
+    # 2. Fallback check for alternative folder pathing
     if not os.path.exists(model_path):
-        st.error(f"❌ Model payload '{model_path}' not found. Please execute model training script first.")
+        model_path = os.path.join(app_dir, 'model_store', 'production_v1.joblib')
+        
+    if not os.path.exists(model_path):
+        st.error(f"❌ Model payload not found. Please verify 'predictive_maintenance_pipeline.joblib' exists in root.")
         st.stop()
-    payload = joblib.load(model_path)
+    
+    try:
+        payload = joblib.load(model_path)
+    except (ImportError, AttributeError, ModuleNotFoundError):
+        # Fallback to custom safe unpickler if standard module resolution fails
+        with open(model_path, 'rb') as f:
+            payload = SafeCustomUnpickler(f).load()
+            
     return payload
 
 payload = load_model_payload()
@@ -229,7 +257,7 @@ with st.sidebar:
     st.success("MODEL PIPELINE ACTIVE & INLINE")
 
 # -----------------------------------------------------------------------------
-# SPLIT-SCREEN HERO SECTION (F-SHAPED FLOW)
+# SPLIT-SCREEN HERO SECTION
 # -----------------------------------------------------------------------------
 hero_left, hero_right = st.columns([2, 1])
 
@@ -281,7 +309,6 @@ with tab1:
             torque = st.number_input("Torque Output [Nm]", min_value=0.0, max_value=100.0, value=40.0, step=0.5)
             tool_wear = st.number_input("Tool Cumulative Wear [min]", min_value=0, max_value=300, value=100, step=1)
 
-    # Input DataFrame Construction
     input_df = pd.DataFrame([{
         'Type': type_val,
         'Air temperature [K]': air_temp,
@@ -333,7 +360,6 @@ with tab1:
                     explainer = shap.Explainer(classifier)
                     shap_values = explainer(x_trans)
 
-                    # Dark Slate Plot Styling
                     fig, ax = plt.subplots(figsize=(8, 4), facecolor='#1e293b')
                     ax.set_facecolor('#1e293b')
                     plt.rcParams['text.color'] = '#f8fafc'
@@ -364,10 +390,8 @@ with tab2:
 
         y_true = batch_df['Machine failure'] if 'Machine failure' in batch_df.columns else None
 
-        # Execute Two-Tier Inference
         results = run_two_tier_inference(batch_df, y_true=y_true)
 
-        # Log metrics to SQLite database upon inference completion
         if results['metrics']:
             log_batch_execution(
                 batch_size=len(batch_df),
@@ -427,7 +451,6 @@ with tab2:
                 except Exception as err:
                     st.info(f"Batch feature importance calculation error: {err}")
 
-        # Retraining Controls
         st.markdown("---")
         if results['drift_alert'] or st.button("TRIGGER TIER-2 AUTOMATED MODEL RETRAIN"):
             with st.spinner("Retraining master pipeline on updated telemetry logs..."):
@@ -435,7 +458,6 @@ with tab2:
                 st.success(f"Retraining Complete! Added {retrain_stats['new_records_added']} new records. Updated Validation F1: {retrain_stats['updated_f1']:.4f}")
                 st.cache_resource.clear()
 
-        # Download Report Protocol
         st.markdown("---")
         st.subheader("Diagnostic Report Generation")
         
@@ -507,7 +529,7 @@ with tab3:
                 st.dataframe(df_plot, use_container_width=True)
 
     else:
-        st.info("💡 Feature importance metrics not detected in model payload. Execute model training script to regenerate the payload.")
+        st.info("💡 Feature importance metrics not detected in model payload.")
 
 # -----------------------------------------------------------------------------
 # TAB 4: MLOPS MODEL DECAY TIMELINE
