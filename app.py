@@ -1,3 +1,4 @@
+%%writefile app.py
 import os
 import sys
 import types
@@ -52,10 +53,10 @@ from retrain_module import execute_tier2_retrain
 from logger_db import fetch_historical_logs, log_batch_execution
 
 # -----------------------------------------------------------------------------
-# CUSTOM UNPICKLER OVERRIDE (ROBUST MODULE MAPPER)
+# CUSTOM UNPICKLER OVERRIDE (PYTHON 3.14 + JOBLIB COMPATIBLE)
 # -----------------------------------------------------------------------------
 class SafeCustomUnpickler(pickle.Unpickler):
-    """Custom unpickler that intercepts and resolves custom transformer lookup failures."""
+    """Custom unpickler that intercepts target classes before module resolution."""
     
     TARGET_CLASSES = {
         "IQROutlierClipper": IQROutlierClipper,
@@ -63,13 +64,30 @@ class SafeCustomUnpickler(pickle.Unpickler):
     }
 
     def find_class(self, module, name):
-        # 1. Direct interception for custom classes to prevent ModuleNotFoundError on import attempt
+        # 1. Immediate direct mapping check (bypasses module import completely)
         if name in self.TARGET_CLASSES:
             return self.TARGET_CLASSES[name]
             
+        # 2. Safe execution of standard resolution with Python 3.14 error trapping
         try:
             return super().find_class(module, name)
-        except (ImportError, AttributeError, ModuleNotFoundError):
+        except (ImportError, AttributeError, ModuleNotFoundError, Exception):
+            if hasattr(custom_transformers, name):
+                return getattr(custom_transformers, name)
+            if hasattr(__main__, name):
+                return getattr(__main__, name)
+            if name in globals():
+                return globals()[name]
+            raise ModuleNotFoundError(f"Could not resolve class '{name}' from module '{module}'.")
+
+# Inject SafeCustomUnpickler into Joblib's unpickler stack
+class SafeJoblibUnpickler(joblib.numpy_pickle.NumpyUnpickler):
+    def find_class(self, module, name):
+        if name in SafeCustomUnpickler.TARGET_CLASSES:
+            return SafeCustomUnpickler.TARGET_CLASSES[name]
+        try:
+            return super().find_class(module, name)
+        except (ImportError, AttributeError, ModuleNotFoundError, Exception):
             if hasattr(custom_transformers, name):
                 return getattr(custom_transformers, name)
             if hasattr(__main__, name):
@@ -88,11 +106,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom High-Contrast CSS with Tech Grid, Solid Dark Slate, and Cyan Accents
 st.markdown(
     """
     <style>
-    /* Dark Mode Solid & Subtle Tech Grid Pattern */
     .stApp {
         background-color: #0f172a;
         background-image: radial-gradient(rgba(56, 189, 248, 0.07) 1px, transparent 0);
@@ -100,7 +116,6 @@ st.markdown(
         color: #f8fafc;
     }
 
-    /* Typography & High-Contrast Readability Rules */
     h1, h2, h3, h4, h5, h6 {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
         font-weight: 700;
@@ -117,7 +132,6 @@ st.markdown(
         font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
     }
 
-    /* Card-Based Grid Container Styling */
     div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column;"] {
         background: #1e293b;
         border: 1px solid #334155;
@@ -126,7 +140,6 @@ st.markdown(
         box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.35);
     }
 
-    /* Production-Ready Tab Styling */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
         background-color: #1e293b;
@@ -162,7 +175,6 @@ st.markdown(
         border-bottom: 2px solid #1e293b !important;
     }
 
-    /* Form Fields */
     div[data-baseweb="select"] > div, 
     div[data-baseweb="input"] > div,
     input {
@@ -177,7 +189,6 @@ st.markdown(
         background-color: #0f172a !important;
     }
 
-    /* Buttons */
     .stButton > button {
         background-color: #0284c7;
         color: #ffffff !important;
@@ -213,10 +224,8 @@ st.markdown(
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def load_model_payload():
-    # 1. Primary path matching root repo structure
     model_path = os.path.join(app_dir, 'predictive_maintenance_pipeline.joblib')
     
-    # 2. Fallback check for alternative folder pathing
     if not os.path.exists(model_path):
         model_path = os.path.join(app_dir, 'model_store', 'production_v1.joblib')
         
@@ -224,15 +233,20 @@ def load_model_payload():
         st.error("❌ Model payload not found. Please verify 'predictive_maintenance_pipeline.joblib' exists in root.")
         st.stop()
     
+    # Try custom unpickler first
     try:
-        # Try custom unpickler directly first to ensure custom module mapping is honored
         with open(model_path, 'rb') as f:
-            payload = SafeCustomUnpickler(f).load()
+            return SafeCustomUnpickler(f).load()
     except Exception:
-        # Secondary fallback to joblib load
-        payload = joblib.load(model_path)
-            
-    return payload
+        pass
+
+    # Fallback to custom Joblib unpickler
+    try:
+        with open(model_path, 'rb') as f:
+            return SafeJoblibUnpickler(model_path, f).load()
+    except Exception:
+        # Final fallback using standard joblib load
+        return joblib.load(model_path)
 
 payload = load_model_payload()
 
