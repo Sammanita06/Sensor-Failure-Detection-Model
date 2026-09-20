@@ -7,7 +7,7 @@ class MaintenanceFeatureEngineer(BaseEstimator, TransformerMixin):
     Custom transformer to engineer domain-specific features for predictive maintenance.
     """
     def __init__(self):
-        self.required_cols = [
+        self.required_cols = [ 
             'Air temperature [K]', 
             'Process temperature [K]', 
             'Rotational speed [rpm]', 
