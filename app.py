@@ -4,7 +4,6 @@ import sys
 # -----------------------------------------------------------------------------
 # PATH & MODULE INJECTION FIX FOR STREAMLIT CLOUD / JOBLIB UNPICKLING
 # -----------------------------------------------------------------------------
-# 1. Force add current app root and working directory to sys.path
 app_dir = os.path.dirname(os.path.abspath(__file__))
 if app_dir not in sys.path:
     sys.path.insert(0, app_dir)
@@ -13,15 +12,23 @@ cwd = os.getcwd()
 if cwd not in sys.path:
     sys.path.insert(0, cwd)
 
-# 2. Pre-import custom transformers and register them in sys.modules
+# Import custom transformers and register across all potential unpickler namespaces
 try:
     import custom_transformers
     from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
 
-    # Explicitly register classes into sys.modules so joblib can unpickle cleanly
-    sys.modules['IQROutlierClipper'] = custom_transformers.IQROutlierClipper
-    sys.modules['MaintenanceFeatureEngineer'] = custom_transformers.MaintenanceFeatureEngineer
-except ImportError as e:
+    # 1. Register under custom_transformers module namespace
+    sys.modules['custom_transformers'] = custom_transformers
+    sys.modules['custom_transformers.IQROutlierClipper'] = IQROutlierClipper
+    sys.modules['custom_transformers.MaintenanceFeatureEngineer'] = MaintenanceFeatureEngineer
+
+    # 2. Fallback: Register under __main__ namespace if pickled during training from __main__
+    import __main__
+    setattr(__main__, 'IQROutlierClipper', IQROutlierClipper)
+    setattr(__main__, 'MaintenanceFeatureEngineer', MaintenanceFeatureEngineer)
+    sys.modules['IQROutlierClipper'] = IQROutlierClipper
+    sys.modules['MaintenanceFeatureEngineer'] = MaintenanceFeatureEngineer
+except Exception as e:
     pass
 
 import joblib
