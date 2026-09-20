@@ -5,7 +5,7 @@ import io
 import pickle
 
 # -----------------------------------------------------------------------------
-# 1. PATH & MODULE INJECTION FIX FOR STREAMLIT CLOUD / JOBLIB UNPICKLING
+# PATH & MODULE INJECTION FIX FOR STREAMLIT CLOUD / JOBLIB UNPICKLING
 # -----------------------------------------------------------------------------
 app_dir = os.path.dirname(os.path.abspath(__file__))
 if app_dir not in sys.path:
@@ -15,41 +15,24 @@ cwd = os.getcwd()
 if cwd not in sys.path:
     sys.path.insert(0, cwd)
 
-# Import custom transformers with fallback module generation
+# Import custom transformers
 try:
     import custom_transformers
     from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
 except ImportError:
+    # Build dynamic fallback module if pathing fails during Cloud initialization
     custom_transformers = types.ModuleType("custom_transformers")
-    
-    # Dynamic fallbacks to ensure unpickling never breaks if file is missing
-    class IQROutlierClipper:
-        def fit(self, X, y=None): return self
-        def transform(self, X): return X
-        
-    class MaintenanceFeatureEngineer:
-        def fit(self, X, y=None): return self
-        def transform(self, X): 
-            X = X.copy()
-            if 'Air temperature [K]' in X.columns and 'Process temperature [K]' in X.columns:
-                X['Temperature_Difference'] = X['Process temperature [K]'] - X['Air temperature [K]']
-            if 'Torque [Nm]' in X.columns and 'Rotational speed [rpm]' in X.columns:
-                X['Power_Index'] = X['Torque [Nm]'] * X['Rotational speed [rpm]']
-            if 'Tool wear [min]' in X.columns and 'Torque [Nm]' in X.columns:
-                X['Wear_Torque_Ratio'] = X['Tool wear [min]'] * X['Torque [Nm]']
-            return X
-        
-    custom_transformers.IQROutlierClipper = IQROutlierClipper
-    custom_transformers.MaintenanceFeatureEngineer = MaintenanceFeatureEngineer
     sys.modules["custom_transformers"] = custom_transformers
     from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
 
-# Register classes across all target import namespaces
+# Register classes across all potential pickle import namespaces
 import __main__
 setattr(__main__, "IQROutlierClipper", IQROutlierClipper)
 setattr(__main__, "MaintenanceFeatureEngineer", MaintenanceFeatureEngineer)
+
 setattr(sys.modules["custom_transformers"], "IQROutlierClipper", IQROutlierClipper)
 setattr(sys.modules["custom_transformers"], "MaintenanceFeatureEngineer", MaintenanceFeatureEngineer)
+
 sys.modules["IQROutlierClipper"] = IQROutlierClipper
 sys.modules["MaintenanceFeatureEngineer"] = MaintenanceFeatureEngineer
 
@@ -58,52 +41,36 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import seaborn as sns
 import shap
 import streamlit as st
 from sklearn.inspection import permutation_importance
 
-# Custom operational modules (with defensive fallbacks)
-try:
-    from drift_monitor import run_two_tier_inference
-except ImportError:
-    def run_two_tier_inference(df, y_true=None):
-        return {
-            'metrics': None,
-            'active_tier': 'Tier 1 (Standard)',
-            'drift_alert': False
-        }
-
-try:
-    from retrain_module import execute_tier2_retrain
-except ImportError:
-    def execute_tier2_retrain(df):
-        return {'new_records_added': len(df), 'updated_f1': 0.8500}
-
-try:
-    from logger_db import fetch_historical_logs, log_batch_execution
-except ImportError:
-    def fetch_historical_logs():
-        return pd.DataFrame()
-    def log_batch_execution(*args, **kwargs):
-        pass
+# Custom operational modules
+from drift_monitor import run_two_tier_inference
+from retrain_module import execute_tier2_retrain
+from logger_db import fetch_historical_logs, log_batch_execution
 
 # -----------------------------------------------------------------------------
-# 2. CUSTOM UNPICKLER OVERRIDE
+# CUSTOM UNPICKLER OVERRIDE (PYTHON 3.14 + JOBLIB COMPATIBLE)
 # -----------------------------------------------------------------------------
 class SafeCustomUnpickler(pickle.Unpickler):
+    """Custom unpickler that intercepts target classes before module resolution."""
+    
     TARGET_CLASSES = {
         "IQROutlierClipper": IQROutlierClipper,
         "MaintenanceFeatureEngineer": MaintenanceFeatureEngineer
     }
 
     def find_class(self, module, name):
+        # 1. Immediate direct mapping check (bypasses module import completely)
         if name in self.TARGET_CLASSES:
             return self.TARGET_CLASSES[name]
+            
+        # 2. Safe execution of standard resolution with Python 3.14 error trapping
         try:
             return super().find_class(module, name)
-        except Exception:
+        except (ImportError, AttributeError, ModuleNotFoundError, Exception):
             if hasattr(custom_transformers, name):
                 return getattr(custom_transformers, name)
             if hasattr(__main__, name):
@@ -112,13 +79,14 @@ class SafeCustomUnpickler(pickle.Unpickler):
                 return globals()[name]
             raise ModuleNotFoundError(f"Could not resolve class '{name}' from module '{module}'.")
 
+# Inject SafeCustomUnpickler into Joblib's unpickler stack
 class SafeJoblibUnpickler(joblib.numpy_pickle.NumpyUnpickler):
     def find_class(self, module, name):
         if name in SafeCustomUnpickler.TARGET_CLASSES:
             return SafeCustomUnpickler.TARGET_CLASSES[name]
         try:
             return super().find_class(module, name)
-        except Exception:
+        except (ImportError, AttributeError, ModuleNotFoundError, Exception):
             if hasattr(custom_transformers, name):
                 return getattr(custom_transformers, name)
             if hasattr(__main__, name):
@@ -128,7 +96,7 @@ class SafeJoblibUnpickler(joblib.numpy_pickle.NumpyUnpickler):
             raise
 
 # -----------------------------------------------------------------------------
-# 3. PAGE CONFIGURATION & STYLING
+# PAGE CONFIGURATION & DEEP NAVY BLUE / GRID CSS
 # -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="Industrial Machinery Diagnostics & Telemetry",
@@ -191,6 +159,11 @@ st.markdown(
         border-bottom: none;
         transition: all 0.2s ease-in-out;
     }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #334155;
+        color: #f8fafc !important;
+    }
 
     .stTabs [aria-selected="true"] {
         background-color: #1e293b !important;
@@ -210,6 +183,11 @@ st.markdown(
         border-radius: 8px !important;
     }
 
+    div[data-baseweb="select"] * {
+        color: #f8fafc !important;
+        background-color: #0f172a !important;
+    }
+
     .stButton > button {
         background-color: #0284c7;
         color: #ffffff !important;
@@ -217,6 +195,12 @@ st.markdown(
         border-radius: 8px;
         border: 1px solid #38bdf8;
         padding: 0.6rem 1.4rem;
+        transition: all 0.2s ease;
+    }
+    
+    .stButton > button:hover {
+        background-color: #0369a1;
+        box-shadow: 0px 0px 14px rgba(56, 189, 248, 0.4);
     }
 
     div[data-testid="stMetricValue"] {
@@ -235,49 +219,44 @@ st.markdown(
 )
 
 # -----------------------------------------------------------------------------
-# 4. LOAD MODEL PIPELINE & PAYLOAD
+# 1. LOAD MODEL PIPELINE & TWO-TIER PAYLOAD
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def load_model_payload():
-    model_paths = [
-        os.path.join(app_dir, 'predictive_maintenance_pipeline.joblib'),
-        os.path.join(app_dir, 'model_store', 'production_v1.joblib'),
-        'predictive_maintenance_pipeline.joblib'
-    ]
+    model_path = os.path.join(app_dir, 'predictive_maintenance_pipeline.joblib')
     
-    model_path = None
-    for p in model_paths:
-        if os.path.exists(p):
-            model_path = p
-            break
-            
-    if not model_path:
-        st.error("❌ Model payload not found. Please verify 'predictive_maintenance_pipeline.joblib' exists.")
+    if not os.path.exists(model_path):
+        model_path = os.path.join(app_dir, 'model_store', 'production_v1.joblib')
+        
+    if not os.path.exists(model_path):
+        st.error("❌ Model payload not found. Please verify 'predictive_maintenance_pipeline.joblib' exists in root.")
         st.stop()
     
+    # Try custom unpickler first
     try:
         with open(model_path, 'rb') as f:
             return SafeCustomUnpickler(f).load()
     except Exception:
         pass
 
+    # Fallback to custom Joblib unpickler
     try:
         with open(model_path, 'rb') as f:
             return SafeJoblibUnpickler(model_path, f).load()
     except Exception:
-        pass
-
-    return joblib.load(model_path)
+        # Final fallback using standard joblib load
+        return joblib.load(model_path)
 
 payload = load_model_payload()
 
+# Extract components from payload
 if isinstance(payload, dict):
-    pipeline = payload.get('pipeline', payload.get('model'))
-    tier1_threshold = float(payload.get('tier1_threshold', 0.8900))
-    tier2_threshold = float(payload.get('tier2_threshold', 0.5000))
-    drift_tolerance_f1 = float(payload.get('drift_tolerance_f1', 0.8000))
+    pipeline = payload.get('pipeline')
+    tier1_threshold = payload.get('tier1_threshold', 0.8900)
+    tier2_threshold = payload.get('tier2_threshold', 0.5000)
+    drift_tolerance_f1 = payload.get('drift_tolerance_f1', 0.8000)
     baseline_metrics = payload.get('baseline_metrics', {})
-    feature_importance_df = payload.get('feature_importances', payload.get('feature_importance_df', None))
+    feature_importance_df = payload.get('feature_importances', None)
 else:
     pipeline = payload
     tier1_threshold = 0.8900
@@ -285,51 +264,8 @@ else:
     drift_tolerance_f1 = 0.8000
     feature_importance_df = None
 
-# Helper function to extract required columns from ColumnTransformer safely
-def get_expected_columns(model_pipeline):
-    """Retrieves list of expected input columns by inspecting ColumnTransformer steps."""
-    expected = []
-    if hasattr(model_pipeline, 'named_steps'):
-        preprocessor = model_pipeline.named_steps.get('preprocessor', None)
-        if preprocessor and hasattr(preprocessor, 'transformers_'):
-            for name, trans, cols in preprocessor.transformers_:
-                if name != 'remainder' and isinstance(cols, (list, tuple, pd.Index, np.ndarray)):
-                    expected.extend(list(cols))
-    return list(set(expected))
-
-# Robust, column-safe prediction wrapper
-def safe_predict_proba(model_pipeline, df_input):
-    """
-    Safely executes prediction by ensuring custom feature engineering 
-    and ColumnTransformer steps execute sequentially on input DataFrames.
-    """
-    df_eval = df_input.copy()
-
-    # Step 1: If feature engineer step exists in pipeline, transform input first
-    if hasattr(model_pipeline, 'named_steps') and 'feature_engineer' in model_pipeline.named_steps:
-        fe_step = model_pipeline.named_steps['feature_engineer']
-        if hasattr(fe_step, 'transform'):
-            df_eval = fe_step.transform(df_eval)
-
-    # Step 2: Ensure any missing engineered or baseline columns are backfilled
-    expected_cols = get_expected_columns(model_pipeline)
-    for col in expected_cols:
-        if col not in df_eval.columns:
-            df_eval[col] = 0.0
-
-    # Step 3: Run preprocessor and classifier sequentially
-    if hasattr(model_pipeline, 'named_steps') and 'preprocessor' in model_pipeline.named_steps:
-        preprocessor = model_pipeline.named_steps['preprocessor']
-        classifier = model_pipeline.named_steps.get('classifier', list(model_pipeline.named_steps.values())[-1])
-
-        X_trans = preprocessor.transform(df_eval)
-        return classifier.predict_proba(X_trans)
-
-    # Fallback to standard pipeline call
-    return model_pipeline.predict_proba(df_eval)
-
 # -----------------------------------------------------------------------------
-# 5. SIDEBAR CONTROL PANEL
+# SIDEBAR CONTROL PANEL
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.markdown("### ⚡ SYSTEM STATUS")
@@ -346,7 +282,7 @@ with st.sidebar:
     st.success("MODEL PIPELINE ACTIVE & INLINE")
 
 # -----------------------------------------------------------------------------
-# 6. HERO SECTION
+# SPLIT-SCREEN HERO SECTION
 # -----------------------------------------------------------------------------
 hero_left, hero_right = st.columns([2, 1])
 
@@ -410,7 +346,7 @@ with tab1:
     st.markdown("---")
     
     if st.button("RUN TELEMETRY DIAGNOSTIC", type="primary"):
-        probs = safe_predict_proba(pipeline, input_df)[0]
+        probs = pipeline.predict_proba(input_df)[0]
         failure_prob = probs[1]
         is_failure = failure_prob >= tier1_threshold
 
@@ -433,61 +369,33 @@ with tab1:
 
         with res_col2:
             with st.container(border=True):
-                st.subheader("Local Model Explanation (Feature Contributions)")
+                st.subheader("Local Model Explanation (SHAP Waterfall)")
                 try:
-                    named_steps = getattr(pipeline, 'named_steps', {})
-                    feature_engineer = named_steps.get('feature_engineer', None)
-                    preprocessor = named_steps.get('preprocessor', None)
-                    classifier = named_steps.get('classifier', list(named_steps.values())[-1] if named_steps else pipeline)
+                    preprocessor = pipeline.named_steps['preprocessor']
+                    feature_engineer = pipeline.named_steps.get('feature_engineer', None)
+                    classifier = pipeline.named_steps['classifier']
 
-                    x_eval = input_df.copy()
-                    if feature_engineer and hasattr(feature_engineer, 'transform'):
-                        x_eval = feature_engineer.transform(x_eval)
-
-                    expected_cols = get_expected_columns(pipeline)
-                    for col in expected_cols:
-                        if col not in x_eval.columns:
-                            x_eval[col] = 0.0
-
-                    x_trans = preprocessor.transform(x_eval) if preprocessor else x_eval
-                    
-                    if hasattr(preprocessor, 'get_feature_names_out'):
-                        feat_names = [f.split('__')[-1] for f in preprocessor.get_feature_names_out()]
+                    if feature_engineer:
+                        x_engineered = feature_engineer.transform(input_df)
                     else:
-                        feat_names = [f"Feature {i}" for i in range(x_trans.shape[1])]
+                        x_engineered = input_df.copy()
+
+                    x_trans = preprocessor.transform(x_engineered)
 
                     explainer = shap.Explainer(classifier)
-                    shap_vals = explainer(x_trans)
+                    shap_values = explainer(x_trans)
 
-                    # Handle binary vs multiclass SHAP dimensions
-                    if len(shap_vals.values.shape) == 3:
-                        vals = shap_vals.values[0, :, 1]
-                    else:
-                        vals = shap_vals.values[0]
-
-                    shap_df = pd.DataFrame({'Feature': feat_names, 'SHAP Value': vals})
-                    shap_df['Impact'] = np.where(shap_df['SHAP Value'] > 0, 'Increases Risk', 'Decreases Risk')
-                    shap_df = shap_df.sort_values(by='SHAP Value', key=abs, ascending=True).tail(8)
-
-                    fig_shap = px.bar(
-                        shap_df,
-                        x='SHAP Value',
-                        y='Feature',
-                        orientation='h',
-                        color='Impact',
-                        color_discrete_map={'Increases Risk': '#ef4444', 'Decreases Risk': '#10b981'},
-                        title="Local Feature Attribution Score"
-                    )
-                    fig_shap.update_layout(
-                        paper_bgcolor='#1e293b',
-                        plot_bgcolor='#1e293b',
-                        font=dict(color='#f8fafc'),
-                        height=350,
-                        margin=dict(l=10, r=10, t=40, b=10)
-                    )
-                    st.plotly_chart(fig_shap, use_container_width=True)
+                    fig, ax = plt.subplots(figsize=(8, 4), facecolor='#1e293b')
+                    ax.set_facecolor('#1e293b')
+                    plt.rcParams['text.color'] = '#f8fafc'
+                    plt.rcParams['axes.labelcolor'] = '#f8fafc'
+                    plt.rcParams['xtick.color'] = '#f8fafc'
+                    plt.rcParams['ytick.color'] = '#f8fafc'
+                    
+                    shap.plots.waterfall(shap_values[0], show=False)
+                    st.pyplot(fig)
                 except Exception as e:
-                    st.info(f"Local SHAP evaluation notice: {e}")
+                    st.info(f"SHAP local breakdown unavailable for this configuration: {e}")
 
 # -----------------------------------------------------------------------------
 # TAB 2: BATCH PREDICTIONS & DRIFT MONITORING
@@ -509,48 +417,77 @@ with tab2:
 
         results = run_two_tier_inference(batch_df, y_true=y_true)
 
-        if results.get('metrics'):
+        if results['metrics']:
             log_batch_execution(
                 batch_size=len(batch_df),
-                f1=results['metrics'].get('f1', 0.0),
-                precision=results['metrics'].get('precision', 0.0),
-                recall=results['metrics'].get('recall', 0.0),
-                tier_used=results.get('active_tier', 'Tier 1'),
-                drift_detected=results.get('drift_alert', False)
+                f1=results['metrics']['f1'],
+                precision=results['metrics']['precision'],
+                recall=results['metrics']['recall'],
+                tier_used=results['active_tier'],
+                drift_detected=results['drift_alert']
             )
 
         st.markdown("---")
         st.subheader("Drift Monitoring & Operational Tier Status")
 
-        active_tier = results.get('active_tier', 'Tier 1 (Standard)')
-        drift_alert = results.get('drift_alert', False)
-
-        if drift_alert:
-            st.error(f"🚨 **CONCEPT DRIFT ALERT DETECTED!** Operating mode overridden to **{active_tier}**.")
+        if results['drift_alert']:
+            st.error(f"🚨 **CONCEPT DRIFT ALERT DETECTED!** Operating mode overridden to **{results['active_tier']}**.")
             st.warning(f"Batch performance F1 dropped below tolerance ({drift_tolerance_f1:.2f}). Tier 2 fallback engaged to prevent uncaptured failures.")
         else:
-            st.success(f"✅ **NORMAL TELEMETRY OPERATING STATE:** Active Tier = **{active_tier}**")
+            st.success(f"✅ **NORMAL TELEMETRY OPERATING STATE:** Active Tier = **{results['active_tier']}**")
 
-        if results.get('metrics'):
+        if results['metrics']:
             with st.container(border=True):
                 st.caption("EVALUATION METRICS FOR CURRENT INGESTED BATCH")
                 col1, col2, col3 = st.columns(3)
-                col1.metric("Batch F1-Score", f"{results['metrics'].get('f1', 0.0):.4f}")
-                col2.metric("Batch Precision", f"{results['metrics'].get('precision', 0.0):.4f}")
-                col3.metric("Batch Recall", f"{results['metrics'].get('recall', 0.0):.4f}")
+                col1.metric("Batch F1-Score", f"{results['metrics']['f1']:.4f}")
+                col2.metric("Batch Precision", f"{results['metrics']['precision']:.4f}")
+                col3.metric("Batch Recall", f"{results['metrics']['recall']:.4f}")
+
+            with st.expander("📊 View Live Feature Importance Spectrum (Ingested Batch)"):
+                try:
+                    X_batch = batch_df.drop(columns=['Machine failure', 'Product ID', 'UDI'], errors='ignore')
+                    y_batch = batch_df['Machine failure']
+                    perm_result = permutation_importance(
+                        pipeline, X_batch, y_batch, scoring='f1', n_repeats=5, random_state=42
+                    )
+                    batch_importance_df = pd.DataFrame({
+                        'Feature': X_batch.columns,
+                        'Importance': perm_result.importances_mean
+                    }).sort_values(by='Importance', ascending=False)
+
+                    fig_batch = px.bar(
+                        batch_importance_df,
+                        x='Importance',
+                        y='Feature',
+                        orientation='h',
+                        title='Batch Feature Importance Distribution',
+                        color='Importance',
+                        color_continuous_scale='Blues'
+                    )
+                    fig_batch.update_layout(
+                        paper_bgcolor='#1e293b',
+                        plot_bgcolor='#1e293b',
+                        font=dict(color='#f8fafc'),
+                        yaxis={'categoryorder': 'total ascending'},
+                        height=350
+                    )
+                    st.plotly_chart(fig_batch, use_container_width=True)
+                except Exception as err:
+                    st.info(f"Batch feature importance calculation error: {err}")
 
         st.markdown("---")
-        if drift_alert or st.button("TRIGGER TIER-2 AUTOMATED MODEL RETRAIN"):
+        if results['drift_alert'] or st.button("TRIGGER TIER-2 AUTOMATED MODEL RETRAIN"):
             with st.spinner("Retraining master pipeline on updated telemetry logs..."):
                 retrain_stats = execute_tier2_retrain(batch_df)
-                st.success(f"Retraining Complete! Added {retrain_stats.get('new_records_added', 0)} new records. Updated Validation F1: {retrain_stats.get('updated_f1', 0.0):.4f}")
+                st.success(f"Retraining Complete! Added {retrain_stats['new_records_added']} new records. Updated Validation F1: {retrain_stats['updated_f1']:.4f}")
                 st.cache_resource.clear()
 
         st.markdown("---")
         st.subheader("Diagnostic Report Generation")
         
-        batch_probs = safe_predict_proba(pipeline, batch_df)[:, 1]
-        active_thresh = tier2_threshold if active_tier == 'Tier 2 (Fallback)' else tier1_threshold
+        batch_probs = pipeline.predict_proba(batch_df)[:, 1]
+        active_thresh = tier2_threshold if results['active_tier'] == 'Tier 2 (Fallback)' else tier1_threshold
         batch_preds = (batch_probs >= active_thresh).astype(int)
 
         results_df = batch_df.copy()
@@ -568,10 +505,7 @@ with tab2:
             b_col2.metric("Nominal Units", f"{healthy_machines:,}")
             b_col3.metric("Critical Faults Flagged", f"{failures_flagged:,}", delta_color="inverse")
 
-        filter_status = st.radio("Filter Status Display:", ["ALL", "CRITICAL_FAULT", "NOMINAL"], horizontal=True)
-        filtered_df = results_df if filter_status == "ALL" else results_df[results_df['Predicted_Status'] == filter_status]
-
-        st.dataframe(filtered_df, use_container_width=True)
+        st.dataframe(results_df, use_container_width=True)
 
         csv_data = results_df.to_csv(index=False).encode('utf-8')
         st.download_button(
@@ -588,22 +522,12 @@ with tab3:
     st.header("Global Model Interpretability & Baseline Analytics")
     st.write("Inspect static baseline feature significance metrics generated during offline pipeline training.")
 
-    df_plot = pd.DataFrame()
-
-    if feature_importance_df is not None:
-        if isinstance(feature_importance_df, pd.DataFrame) and not feature_importance_df.empty:
-            df_plot = feature_importance_df.copy()
-        elif isinstance(feature_importance_df, (list, np.ndarray)):
-            df_plot = pd.DataFrame({
-                'Feature': [f"Feature {i}" for i in range(len(feature_importance_df))],
-                'Importance': feature_importance_df
-            })
-
-    if not df_plot.empty:
+    if feature_importance_df is not None and not feature_importance_df.empty:
         with st.container(border=True):
             st.subheader("📊 Global Baseline Feature Importance")
             st.caption("Permutation importance evaluated on validation splits.")
 
+            df_plot = feature_importance_df.copy()
             if 'Feature' in df_plot.columns:
                 df_plot['Feature'] = df_plot['Feature'].apply(lambda x: str(x).split('__')[-1])
 
@@ -628,50 +552,9 @@ with tab3:
 
             with st.expander("📋 View Baseline Importance Raw Data"):
                 st.dataframe(df_plot, use_container_width=True)
+
     else:
-        st.info("💡 Baseline feature importance metrics not included in payload. Generating dynamic feature evaluation...")
-        
-        sample_data = pd.DataFrame([
-            {'Type': 'L', 'Air temperature [K]': 300.0, 'Process temperature [K]': 310.0, 'Rotational speed [rpm]': 1500, 'Torque [Nm]': 40.0, 'Tool wear [min]': 100},
-            {'Type': 'M', 'Air temperature [K]': 298.0, 'Process temperature [K]': 308.0, 'Rotational speed [rpm]': 1400, 'Torque [Nm]': 50.0, 'Tool wear [min]': 200},
-            {'Type': 'H', 'Air temperature [K]': 303.0, 'Process temperature [K]': 313.0, 'Rotational speed [rpm]': 2000, 'Torque [Nm]': 60.0, 'Tool wear [min]': 240}
-        ])
-        
-        try:
-            named_steps = getattr(pipeline, 'named_steps', {})
-            feature_engineer = named_steps.get('feature_engineer', None)
-            preprocessor = named_steps.get('preprocessor', None)
-            classifier = named_steps.get('classifier', list(named_steps.values())[-1] if named_steps else pipeline)
-
-            x_eval = sample_data.copy()
-            if feature_engineer and hasattr(feature_engineer, 'transform'):
-                x_eval = feature_engineer.transform(x_eval)
-
-            expected_cols = get_expected_columns(pipeline)
-            for col in expected_cols:
-                if col not in x_eval.columns:
-                    x_eval[col] = 0.0
-
-            x_trans = preprocessor.transform(x_eval) if preprocessor else x_eval
-            
-            if hasattr(preprocessor, 'get_feature_names_out'):
-                feat_names = [f.split('__')[-1] for f in preprocessor.get_feature_names_out()]
-            else:
-                feat_names = [f"Feature {i}" for i in range(x_trans.shape[1])]
-
-            if hasattr(classifier, 'feature_importances_'):
-                importances = classifier.feature_importances_
-                df_dyn = pd.DataFrame({'Feature': feat_names, 'Importance': importances}).sort_values(by='Importance', ascending=True)
-                
-                fig_dyn = px.bar(
-                    df_dyn, x='Importance', y='Feature', orientation='h',
-                    title='Model Internal Feature Importances',
-                    color='Importance', color_continuous_scale='Tealgrn'
-                )
-                fig_dyn.update_layout(paper_bgcolor='#1e293b', plot_bgcolor='#1e293b', font=dict(color='#f8fafc'), height=450)
-                st.plotly_chart(fig_dyn, use_container_width=True)
-        except Exception as ex:
-            st.warning(f"Could not calculate dynamic feature importance: {ex}")
+        st.info("💡 Feature importance metrics not detected in model payload.")
 
 # -----------------------------------------------------------------------------
 # TAB 4: MLOPS MODEL DECAY TIMELINE
@@ -682,29 +565,26 @@ with tab4:
 
     logs_df = fetch_historical_logs()
 
-    if isinstance(logs_df, pd.DataFrame) and not logs_df.empty:
-        required_cols = {'timestamp', 'f1_score', 'precision_score', 'recall_score'}
-        if required_cols.issubset(logs_df.columns):
-            fig_decay = px.line(
-                logs_df,
-                x='timestamp',
-                y=['f1_score', 'precision_score', 'recall_score'],
-                markers=True,
-                title='Historical Model Performance Across Batch Inferences',
-                labels={'value': 'Score', 'timestamp': 'Execution Time'}
-            )
-            fig_decay.update_layout(
-                paper_bgcolor='#1e293b',
-                plot_bgcolor='#1e293b',
-                font=dict(color='#f8fafc'),
-                height=450
-            )
-            st.plotly_chart(fig_decay, use_container_width=True)
+    if not logs_df.empty:
+        fig_decay = px.line(
+            logs_df,
+            x='timestamp',
+            y=['f1_score', 'precision_score', 'recall_score'],
+            markers=True,
+            title='Historical Model Performance Across Batch Inferences',
+            labels={'value': 'Score', 'timestamp': 'Execution Time'}
+        )
+        fig_decay.update_layout(
+            paper_bgcolor='#1e293b',
+            plot_bgcolor='#1e293b',
+            font=dict(color='#f8fafc'),
+            height=450
+        )
+        st.plotly_chart(fig_decay, use_container_width=True)
 
         st.subheader("Raw Operational Logs")
-        sort_col = 'id' if 'id' in logs_df.columns else logs_df.columns[0]
         st.dataframe(
-            logs_df.sort_values(by=sort_col, ascending=False), use_container_width=True
+            logs_df.sort_values(by='id', ascending=False), use_container_width=True
         )
     else:
-        st.info("No historical logs found in execution registry. Run batch inference in Tab 2 to record operational logs.")
+        st.info("No execution logs found in SQLite database. Run batch inference to generate operational logs.")
