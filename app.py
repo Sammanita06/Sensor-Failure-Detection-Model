@@ -4,6 +4,7 @@ import sys
 # -----------------------------------------------------------------------------
 # PATH & MODULE INJECTION FIX FOR STREAMLIT CLOUD / JOBLIB UNPICKLING
 # -----------------------------------------------------------------------------
+# 1. Force add current app root and working directory to sys.path
 app_dir = os.path.dirname(os.path.abspath(__file__))
 if app_dir not in sys.path:
     sys.path.insert(0, app_dir)
@@ -12,14 +13,15 @@ cwd = os.getcwd()
 if cwd not in sys.path:
     sys.path.insert(0, cwd)
 
+# 2. Pre-import custom transformers and register them in sys.modules
 try:
     import custom_transformers
     from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
-    
-    # Map classes to sys.modules for unpickling fallback
+
+    # Explicitly register classes into sys.modules so joblib can unpickle cleanly
     sys.modules['IQROutlierClipper'] = custom_transformers.IQROutlierClipper
     sys.modules['MaintenanceFeatureEngineer'] = custom_transformers.MaintenanceFeatureEngineer
-except Exception as e:
+except ImportError as e:
     pass
 
 import joblib
@@ -32,7 +34,7 @@ import shap
 import streamlit as st
 from sklearn.inspection import permutation_importance
 
-# Custom modules
+# Custom operational modules
 from drift_monitor import run_two_tier_inference
 from retrain_module import execute_tier2_retrain
 from logger_db import fetch_historical_logs, log_batch_execution
@@ -178,9 +180,9 @@ st.markdown(
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def load_model_payload():
-    model_path = 'model_store/production_v1.joblib'
+    model_path = os.path.join(app_dir, 'model_store', 'production_v1.joblib')
     if not os.path.exists(model_path):
-        st.error(f"❌ Model payload '{model_path}' not found. Please execute train_master.py first.")
+        st.error(f"❌ Model payload '{model_path}' not found. Please execute model training script first.")
         st.stop()
     payload = joblib.load(model_path)
     return payload
@@ -498,7 +500,7 @@ with tab3:
                 st.dataframe(df_plot, use_container_width=True)
 
     else:
-        st.info("💡 Feature importance metrics not detected in model payload. Execute `python train_master.py` to regenerate the payload.")
+        st.info("💡 Feature importance metrics not detected in model payload. Execute model training script to regenerate the payload.")
 
 # -----------------------------------------------------------------------------
 # TAB 4: MLOPS MODEL DECAY TIMELINE
