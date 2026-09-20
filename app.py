@@ -299,41 +299,34 @@ def get_expected_columns(model_pipeline):
 # Robust, column-safe prediction wrapper
 def safe_predict_proba(model_pipeline, df_input):
     """
-    Safely executes prediction while handling missing columns required by downstream transformers.
+    Safely executes prediction by ensuring custom feature engineering 
+    and ColumnTransformer steps execute sequentially on input DataFrames.
     """
     df_eval = df_input.copy()
+
+    # Step 1: If feature engineer step exists in pipeline, transform input first
+    if hasattr(model_pipeline, 'named_steps') and 'feature_engineer' in model_pipeline.named_steps:
+        fe_step = model_pipeline.named_steps['feature_engineer']
+        if hasattr(fe_step, 'transform'):
+            df_eval = fe_step.transform(df_eval)
+
+    # Step 2: Ensure any missing engineered or baseline columns are backfilled
+    expected_cols = get_expected_columns(model_pipeline)
+    for col in expected_cols:
+        if col not in df_eval.columns:
+            df_eval[col] = 0.0
+
+    # Step 3: Run preprocessor and classifier sequentially
+    if hasattr(model_pipeline, 'named_steps') and 'preprocessor' in model_pipeline.named_steps:
+        preprocessor = model_pipeline.named_steps['preprocessor']
+        classifier = model_pipeline.named_steps.get('classifier', list(model_pipeline.named_steps.values())[-1])
+
+        X_trans = preprocessor.transform(df_eval)
+        return classifier.predict_proba(X_trans)
+
+    # Fallback to standard pipeline call
+    return model_pipeline.predict_proba(df_eval)
     
-    try:
-        # Standard direct pipeline evaluation
-        return model_pipeline.predict_proba(df_eval)
-    except ValueError as err:
-        err_msg = str(err)
-        if "columns are missing" in err_msg:
-            # Dynamically extract missing columns and patch them
-            expected_cols = get_expected_columns(model_pipeline)
-            
-            # Step 1: Run feature engineer transformer if available
-            if hasattr(model_pipeline, 'named_steps'):
-                fe_step = model_pipeline.named_steps.get('feature_engineer', None)
-                if fe_step and hasattr(fe_step, 'transform'):
-                    df_eval = fe_step.transform(df_eval)
-
-            # Step 2: Backfill any missing expected columns with zeros
-            for col in expected_cols:
-                if col not in df_eval.columns:
-                    df_eval[col] = 0.0
-
-            # Step 3: Run pipeline without the feature_engineer step if already applied, or fit schema
-            if hasattr(model_pipeline, 'named_steps') and 'preprocessor' in model_pipeline.named_steps:
-                preprocessor = model_pipeline.named_steps['preprocessor']
-                classifier = model_pipeline.named_steps.get('classifier', list(model_pipeline.named_steps.values())[-1])
-                
-                # Transform via preprocessor directly and predict
-                X_trans = preprocessor.transform(df_eval)
-                return classifier.predict_proba(X_trans)
-
-        raise err
-
 # -----------------------------------------------------------------------------
 # 5. SIDEBAR CONTROL PANEL
 # -----------------------------------------------------------------------------
@@ -442,19 +435,22 @@ with tab1:
                 st.subheader("Local Model Explanation (SHAP Waterfall)")
                 try:
                     named_steps = getattr(pipeline, 'named_steps', {})
-                    preprocessor = named_steps.get('preprocessor', None)
                     feature_engineer = named_steps.get('feature_engineer', None)
+                    preprocessor = named_steps.get('preprocessor', None)
                     classifier = named_steps.get('classifier', list(named_steps.values())[-1] if named_steps else pipeline)
 
-                    x_engineered = feature_engineer.transform(input_df) if feature_engineer else input_df.copy()
-                    
-                    # Ensure engineered columns match preprocessor
+                    # Sequential Feature Transformation
+                    x_eval = input_df.copy()
+                    if feature_engineer and hasattr(feature_engineer, 'transform'):
+                        x_eval = feature_engineer.transform(x_eval)
+
+                    # Backfill expected preprocessor columns
                     expected_cols = get_expected_columns(pipeline)
                     for col in expected_cols:
-                        if col not in x_engineered.columns:
-                            x_engineered[col] = 0.0
+                        if col not in x_eval.columns:
+                            x_eval[col] = 0.0
 
-                    x_trans = preprocessor.transform(x_engineered) if preprocessor else x_engineered
+                    x_trans = preprocessor.transform(x_eval) if preprocessor else x_eval
 
                     explainer = shap.Explainer(classifier)
                     shap_values = explainer(x_trans)
@@ -465,13 +461,12 @@ with tab1:
                     plt.rcParams['axes.labelcolor'] = '#f8fafc'
                     plt.rcParams['xtick.color'] = '#f8fafc'
                     plt.rcParams['ytick.color'] = '#f8fafc'
-                    
+
                     shap.plots.waterfall(shap_values[0], show=False)
                     st.pyplot(fig)
                     plt.close(fig)
                 except Exception as e:
                     st.info(f"SHAP local breakdown notice: {e}")
-
 # -----------------------------------------------------------------------------
 # TAB 2: BATCH PREDICTIONS & DRIFT MONITORING
 # -----------------------------------------------------------------------------
