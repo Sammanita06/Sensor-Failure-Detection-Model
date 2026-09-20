@@ -58,6 +58,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import seaborn as sns
 import shap
 import streamlit as st
@@ -326,7 +327,7 @@ def safe_predict_proba(model_pipeline, df_input):
 
     # Fallback to standard pipeline call
     return model_pipeline.predict_proba(df_eval)
-    
+
 # -----------------------------------------------------------------------------
 # 5. SIDEBAR CONTROL PANEL
 # -----------------------------------------------------------------------------
@@ -432,41 +433,62 @@ with tab1:
 
         with res_col2:
             with st.container(border=True):
-                st.subheader("Local Model Explanation (SHAP Waterfall)")
+                st.subheader("Local Model Explanation (Feature Contributions)")
                 try:
                     named_steps = getattr(pipeline, 'named_steps', {})
                     feature_engineer = named_steps.get('feature_engineer', None)
                     preprocessor = named_steps.get('preprocessor', None)
                     classifier = named_steps.get('classifier', list(named_steps.values())[-1] if named_steps else pipeline)
 
-                    # Sequential Feature Transformation
                     x_eval = input_df.copy()
                     if feature_engineer and hasattr(feature_engineer, 'transform'):
                         x_eval = feature_engineer.transform(x_eval)
 
-                    # Backfill expected preprocessor columns
                     expected_cols = get_expected_columns(pipeline)
                     for col in expected_cols:
                         if col not in x_eval.columns:
                             x_eval[col] = 0.0
 
                     x_trans = preprocessor.transform(x_eval) if preprocessor else x_eval
+                    
+                    if hasattr(preprocessor, 'get_feature_names_out'):
+                        feat_names = [f.split('__')[-1] for f in preprocessor.get_feature_names_out()]
+                    else:
+                        feat_names = [f"Feature {i}" for i in range(x_trans.shape[1])]
 
                     explainer = shap.Explainer(classifier)
-                    shap_values = explainer(x_trans)
+                    shap_vals = explainer(x_trans)
 
-                    fig, ax = plt.subplots(figsize=(8, 4), facecolor='#1e293b')
-                    ax.set_facecolor('#1e293b')
-                    plt.rcParams['text.color'] = '#f8fafc'
-                    plt.rcParams['axes.labelcolor'] = '#f8fafc'
-                    plt.rcParams['xtick.color'] = '#f8fafc'
-                    plt.rcParams['ytick.color'] = '#f8fafc'
+                    # Handle binary vs multiclass SHAP dimensions
+                    if len(shap_vals.values.shape) == 3:
+                        vals = shap_vals.values[0, :, 1]
+                    else:
+                        vals = shap_vals.values[0]
 
-                    shap.plots.waterfall(shap_values[0], show=False)
-                    st.pyplot(fig)
-                    plt.close(fig)
+                    shap_df = pd.DataFrame({'Feature': feat_names, 'SHAP Value': vals})
+                    shap_df['Impact'] = np.where(shap_df['SHAP Value'] > 0, 'Increases Risk', 'Decreases Risk')
+                    shap_df = shap_df.sort_values(by='SHAP Value', key=abs, ascending=True).tail(8)
+
+                    fig_shap = px.bar(
+                        shap_df,
+                        x='SHAP Value',
+                        y='Feature',
+                        orientation='h',
+                        color='Impact',
+                        color_discrete_map={'Increases Risk': '#ef4444', 'Decreases Risk': '#10b981'},
+                        title="Local Feature Attribution Score"
+                    )
+                    fig_shap.update_layout(
+                        paper_bgcolor='#1e293b',
+                        plot_bgcolor='#1e293b',
+                        font=dict(color='#f8fafc'),
+                        height=350,
+                        margin=dict(l=10, r=10, t=40, b=10)
+                    )
+                    st.plotly_chart(fig_shap, use_container_width=True)
                 except Exception as e:
-                    st.info(f"SHAP local breakdown notice: {e}")
+                    st.info(f"Local SHAP evaluation notice: {e}")
+
 # -----------------------------------------------------------------------------
 # TAB 2: BATCH PREDICTIONS & DRIFT MONITORING
 # -----------------------------------------------------------------------------
@@ -546,7 +568,10 @@ with tab2:
             b_col2.metric("Nominal Units", f"{healthy_machines:,}")
             b_col3.metric("Critical Faults Flagged", f"{failures_flagged:,}", delta_color="inverse")
 
-        st.dataframe(results_df, use_container_width=True)
+        filter_status = st.radio("Filter Status Display:", ["ALL", "CRITICAL_FAULT", "NOMINAL"], horizontal=True)
+        filtered_df = results_df if filter_status == "ALL" else results_df[results_df['Predicted_Status'] == filter_status]
+
+        st.dataframe(filtered_df, use_container_width=True)
 
         csv_data = results_df.to_csv(index=False).encode('utf-8')
         st.download_button(
@@ -563,6 +588,8 @@ with tab3:
     st.header("Global Model Interpretability & Baseline Analytics")
     st.write("Inspect static baseline feature significance metrics generated during offline pipeline training.")
 
+    df_plot = pd.DataFrame()
+
     if feature_importance_df is not None:
         if isinstance(feature_importance_df, pd.DataFrame) and not feature_importance_df.empty:
             df_plot = feature_importance_df.copy()
@@ -571,42 +598,80 @@ with tab3:
                 'Feature': [f"Feature {i}" for i in range(len(feature_importance_df))],
                 'Importance': feature_importance_df
             })
-        else:
-            df_plot = pd.DataFrame()
 
-        if not df_plot.empty:
-            with st.container(border=True):
-                st.subheader("📊 Global Baseline Feature Importance")
-                st.caption("Permutation importance evaluated on validation splits.")
+    if not df_plot.empty:
+        with st.container(border=True):
+            st.subheader("📊 Global Baseline Feature Importance")
+            st.caption("Permutation importance evaluated on validation splits.")
 
-                if 'Feature' in df_plot.columns:
-                    df_plot['Feature'] = df_plot['Feature'].apply(lambda x: str(x).split('__')[-1])
+            if 'Feature' in df_plot.columns:
+                df_plot['Feature'] = df_plot['Feature'].apply(lambda x: str(x).split('__')[-1])
 
-                fig_imp = px.bar(
-                    df_plot,
-                    x='Importance',
-                    y='Feature',
-                    orientation='h',
-                    title='Global Feature Significance',
-                    color='Importance',
-                    color_continuous_scale='Tealgrn',
-                    labels={'Importance': 'Mean Score Drop', 'Feature': 'Feature Vector'}
-                )
-                fig_imp.update_layout(
-                    paper_bgcolor='#1e293b',
-                    plot_bgcolor='#1e293b',
-                    font=dict(color='#f8fafc'),
-                    yaxis={'categoryorder': 'total ascending'},
-                    height=450
-                )
-                st.plotly_chart(fig_imp, use_container_width=True)
+            fig_imp = px.bar(
+                df_plot,
+                x='Importance',
+                y='Feature',
+                orientation='h',
+                title='Global Feature Significance',
+                color='Importance',
+                color_continuous_scale='Tealgrn',
+                labels={'Importance': 'Mean Score Drop', 'Feature': 'Feature Vector'}
+            )
+            fig_imp.update_layout(
+                paper_bgcolor='#1e293b',
+                plot_bgcolor='#1e293b',
+                font=dict(color='#f8fafc'),
+                yaxis={'categoryorder': 'total ascending'},
+                height=450
+            )
+            st.plotly_chart(fig_imp, use_container_width=True)
 
-                with st.expander("📋 View Baseline Importance Raw Data"):
-                    st.dataframe(df_plot, use_container_width=True)
-        else:
-            st.info("💡 Feature importance structure detected, but contained no data.")
+            with st.expander("📋 View Baseline Importance Raw Data"):
+                st.dataframe(df_plot, use_container_width=True)
     else:
-        st.info("💡 Baseline feature importance metrics not included in current model payload.")
+        st.info("💡 Baseline feature importance metrics not included in payload. Generating dynamic feature evaluation...")
+        
+        sample_data = pd.DataFrame([
+            {'Type': 'L', 'Air temperature [K]': 300.0, 'Process temperature [K]': 310.0, 'Rotational speed [rpm]': 1500, 'Torque [Nm]': 40.0, 'Tool wear [min]': 100},
+            {'Type': 'M', 'Air temperature [K]': 298.0, 'Process temperature [K]': 308.0, 'Rotational speed [rpm]': 1400, 'Torque [Nm]': 50.0, 'Tool wear [min]': 200},
+            {'Type': 'H', 'Air temperature [K]': 303.0, 'Process temperature [K]': 313.0, 'Rotational speed [rpm]': 2000, 'Torque [Nm]': 60.0, 'Tool wear [min]': 240}
+        ])
+        
+        try:
+            named_steps = getattr(pipeline, 'named_steps', {})
+            feature_engineer = named_steps.get('feature_engineer', None)
+            preprocessor = named_steps.get('preprocessor', None)
+            classifier = named_steps.get('classifier', list(named_steps.values())[-1] if named_steps else pipeline)
+
+            x_eval = sample_data.copy()
+            if feature_engineer and hasattr(feature_engineer, 'transform'):
+                x_eval = feature_engineer.transform(x_eval)
+
+            expected_cols = get_expected_columns(pipeline)
+            for col in expected_cols:
+                if col not in x_eval.columns:
+                    x_eval[col] = 0.0
+
+            x_trans = preprocessor.transform(x_eval) if preprocessor else x_eval
+            
+            if hasattr(preprocessor, 'get_feature_names_out'):
+                feat_names = [f.split('__')[-1] for f in preprocessor.get_feature_names_out()]
+            else:
+                feat_names = [f"Feature {i}" for i in range(x_trans.shape[1])]
+
+            if hasattr(classifier, 'feature_importances_'):
+                importances = classifier.feature_importances_
+                df_dyn = pd.DataFrame({'Feature': feat_names, 'Importance': importances}).sort_values(by='Importance', ascending=True)
+                
+                fig_dyn = px.bar(
+                    df_dyn, x='Importance', y='Feature', orientation='h',
+                    title='Model Internal Feature Importances',
+                    color='Importance', color_continuous_scale='Tealgrn'
+                )
+                fig_dyn.update_layout(paper_bgcolor='#1e293b', plot_bgcolor='#1e293b', font=dict(color='#f8fafc'), height=450)
+                st.plotly_chart(fig_dyn, use_container_width=True)
+        except Exception as ex:
+            st.warning(f"Could not calculate dynamic feature importance: {ex}")
 
 # -----------------------------------------------------------------------------
 # TAB 4: MLOPS MODEL DECAY TIMELINE
