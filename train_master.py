@@ -61,13 +61,15 @@ all_numeric_cols = raw_numeric_cols + [
 ]
 ordinal_cols = ['Type']
 
-# 5. Preprocessor Setup (Constructed to execute in sequential stages)
+# 5. Preprocessor Setup
+# Numerical Scaling & Outlier Pipeline
 numeric_pipeline = Pipeline([
     ('imputer', SimpleImputer(strategy='median')),
     ('outlier_clipper', IQROutlierClipper(factor=1.5)),
     ('scaler', StandardScaler()),
 ])
 
+# Categorical Encoding Pipeline
 ordinal_pipeline = Pipeline([
     (
         'encoder',
@@ -79,26 +81,24 @@ ordinal_pipeline = Pipeline([
     )
 ])
 
-# Sequential pipeline: Impute Raw -> Engineer Features -> Scale & Encode
+# ColumnTransformer for scaling & encoding after feature engineering
+scaler_encoder = ColumnTransformer(
+    transformers=[
+        ('num', numeric_pipeline, all_numeric_cols),
+        ('ord', ordinal_pipeline, ordinal_cols),
+    ],
+    remainder='drop',
+    verbose_feature_names_out=False,
+    n_jobs=1
+)
+
+# Set pandas output so feature names are preserved across steps
+scaler_encoder.set_output(transform="pandas")
+
+# Clean Feature Processing Pipeline (Feature Engineer -> Scaler/Encoder)
 feature_processing_pipeline = Pipeline([
-    ('raw_imputer', ColumnTransformer(
-        transformers=[
-            ('num_imp', SimpleImputer(strategy='median'), raw_numeric_cols),
-            ('ord_imp', SimpleImputer(strategy='most_frequent'), ordinal_cols)
-        ],
-        remainder='drop',
-        verbose_feature_names_out=False
-    )),
     ('feature_engineer', MaintenanceFeatureEngineer()),
-    ('scaler_encoder', ColumnTransformer(
-        transformers=[
-            ('num', numeric_pipeline, all_numeric_cols),
-            ('ord', ordinal_pipeline, ordinal_cols),
-        ],
-        remainder='drop',
-        verbose_feature_names_out=False,
-        n_jobs=1
-    ))
+    ('scaler_encoder', scaler_encoder)
 ])
 
 # 6. Champion Model Pipeline (HistGradientBoosting)
@@ -137,24 +137,29 @@ baseline_precision = precision_score(y_test, test_preds, zero_division=0)
 baseline_recall = recall_score(y_test, test_preds, zero_division=0)
 baseline_acc = accuracy_score(y_test, test_preds)
 
-# 8. Calculate Permutation Feature Importances
+# 8. Calculate Permutation Feature Importances (Optimized to prevent deadlocks)
 print("Calculating Permutation Feature Importances...")
 X_test_transformed = hgb_pipeline.named_steps['preprocessor'].transform(x_test)
 
-try:
-    feature_names = all_numeric_cols + ordinal_cols
-except Exception:
-    feature_names = [f"feature_{i}" for i in range(X_test_transformed.shape[1])]
+# Sample a subset (e.g., 500 rows) to speed up execution and avoid thread locks
+sample_size = min(500, len(X_test_transformed))
+if isinstance(X_test_transformed, pd.DataFrame):
+    X_sample = X_test_transformed.iloc[:sample_size]
+else:
+    X_sample = X_test_transformed[:sample_size]
 
+y_sample = y_test.iloc[:sample_size]
+
+feature_names = all_numeric_cols + ordinal_cols
 classifier = hgb_pipeline.named_steps['classifier']
 
 perm_result = permutation_importance(
     classifier,
-    X_test_transformed,
-    y_test,
-    n_repeats=10,
+    X_sample,
+    y_sample,
+    n_repeats=5,       # Reduced from 10 to 5 for speed
     random_state=42,
-    n_jobs=1,
+    n_jobs=1           # Ensures single-threaded execution
 )
 
 importance_df = pd.DataFrame({
@@ -162,20 +167,6 @@ importance_df = pd.DataFrame({
     'Importance': perm_result.importances_mean,
     'Std': perm_result.importances_std,
 }).sort_values(by='Importance', ascending=False)
-
-print("=" * 60)
-print("BASE PLAN EXPORT SUMMARY")
-print("=" * 60)
-print(f"Optimal Threshold: {optimal_threshold:.4f}")
-print(f"Accuracy:          {baseline_acc:.4f}")
-print(f"F1-Score:          {baseline_f1:.4f}")
-print(f"Precision:         {baseline_precision:.4f}")
-print(f"Recall:            {baseline_recall:.4f}\n")
-
-print("Top Feature Importances:")
-print(importance_df.head().to_string(index=False))
-print("=" * 60)
-
 # 9. Export Unified Payload
 model_payload = {
     'pipeline': hgb_pipeline,

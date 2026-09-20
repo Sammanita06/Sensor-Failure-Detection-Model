@@ -1,12 +1,26 @@
 import os
 import sys
 
-# Ensure local modules can be found by joblib during deserialization
+# -----------------------------------------------------------------------------
+# PATH & MODULE INJECTION FIX FOR STREAMLIT CLOUD / JOBLIB UNPICKLING
+# -----------------------------------------------------------------------------
+app_dir = os.path.dirname(os.path.abspath(__file__))
+if app_dir not in sys.path:
+    sys.path.insert(0, app_dir)
+
+cwd = os.getcwd()
+if cwd not in sys.path:
+    sys.path.insert(0, cwd)
+
 try:
+    import custom_transformers
     from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
-except ImportError:
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-    from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
+    
+    # Map classes to sys.modules for unpickling fallback
+    sys.modules['IQROutlierClipper'] = custom_transformers.IQROutlierClipper
+    sys.modules['MaintenanceFeatureEngineer'] = custom_transformers.MaintenanceFeatureEngineer
+except Exception as e:
+    pass
 
 import joblib
 import matplotlib.pyplot as plt

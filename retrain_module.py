@@ -9,11 +9,7 @@ MASTER_DATA_PATH = 'model_store/historical_master_data.csv'
 PAYLOAD_PATH = 'model_store/production_v1.joblib'
 
 def execute_tier2_retrain(new_batch_df):
-    """
-    Appends new batch data to master historical CSV without duplicates,
-    retrains the production pipeline safely, evaluates performance, 
-    and updates production_v1.joblib.
-    """
+    
     if not os.path.exists(MASTER_DATA_PATH) or not os.path.exists(PAYLOAD_PATH):
         raise FileNotFoundError("Master storage files missing. Run initial setup script first.")
 
@@ -33,7 +29,7 @@ def execute_tier2_retrain(new_batch_df):
     # Save expanded historical dataset back to disk
     combined_df.to_csv(MASTER_DATA_PATH, index=False)
 
-    # 3. Prepare Retraining Splits (Explicitly drop non-feature IDs like UDI and Product ID)
+    # 3. Prepare Retraining Splits
     X_updated = combined_df.drop(columns=['Machine failure', 'Product ID', 'UDI'], errors='ignore')
     Y_updated = combined_df['Machine failure']
 
@@ -53,29 +49,44 @@ def execute_tier2_retrain(new_batch_df):
     updated_recall = recall_score(y_test, new_preds, zero_division=0)
     updated_acc = accuracy_score(y_test, new_preds)
 
-    # 6. Recalculate Updated Permutation Importance
-    feature_engineer = pipeline.named_steps['feature_engineer']
-    preprocessor = pipeline.named_steps['preprocessor']
+    # 6. Optimized Permutation Importance (Sampling to prevent deadlocks)
+    print("Calculating Permutation Feature Importances...")
+    
+    # Transform test set using the internal preprocessor
+    X_test_transformed = pipeline.named_steps['preprocessor'].transform(X_test)
+
+    # Sample a subset to avoid thread/kernel hanging
+    sample_size = min(500, len(X_test_transformed))
+    if isinstance(X_test_transformed, pd.DataFrame):
+        X_sample = X_test_transformed.iloc[:sample_size]
+    else:
+        X_sample = X_test_transformed[:sample_size]
+
+    y_sample = y_test.iloc[:sample_size]
+
+    # Retrieve feature names safely from payload or index
+    feature_names = payload.get('feature_names', [f"feature_{i}" for i in range(X_test_transformed.shape[1])])
     classifier = pipeline.named_steps['classifier']
 
-    # Step-by-step transformation sequence to ensure engineered columns exist
-    X_test_engineered = feature_engineer.transform(X_test)
-    X_test_trans = preprocessor.transform(X_test_engineered)
-
-    perm_res = permutation_importance(
-        classifier, X_test_trans, y_test, scoring='f1', n_repeats=3, random_state=42, n_jobs=1
+    perm_result = permutation_importance(
+        classifier,
+        X_sample,
+        y_sample,
+        n_repeats=5,
+        random_state=42,
+        n_jobs=1
     )
-    
-    feature_names = payload.get('feature_names', [f"feature_{i}" for i in range(X_test_trans.shape[1])])
-    
+
     feature_imp_df = pd.DataFrame({
-        'Feature': feature_names[:X_test_trans.shape[1]],
-        'Importance': perm_res.importances_mean
+        'Feature': feature_names[:X_test_transformed.shape[1]],
+        'Importance': perm_result.importances_mean,
+        'Std': perm_result.importances_std,
     }).sort_values(by='Importance', ascending=False)
 
     # 7. Overwrite Payload Artifacts
     updated_payload = {
         'pipeline': pipeline,
+        'optimal_threshold': float(active_threshold),
         'tier1_threshold': payload.get('tier1_threshold', active_threshold),
         'tier2_threshold': payload.get('tier2_threshold', 0.50),
         'drift_tolerance_f1': payload.get('drift_tolerance_f1', 0.80),
@@ -86,7 +97,8 @@ def execute_tier2_retrain(new_batch_df):
             'accuracy': float(updated_acc)
         },
         'feature_importances': feature_imp_df,
-        'feature_names': X_updated.columns.tolist()
+        'required_cols': payload.get('required_cols', X_updated.columns.tolist()),
+        'feature_names': feature_names
     }
 
     joblib.dump(updated_payload, PAYLOAD_PATH)

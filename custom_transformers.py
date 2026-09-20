@@ -32,16 +32,9 @@ class MaintenanceFeatureEngineer(BaseEstimator, TransformerMixin):
         if 'Tool wear [min]' in X_df.columns and 'Torque [Nm]' in X_df.columns:
             X_df['Overstrain_Product'] = X_df['Tool wear [min]'] * X_df['Torque [Nm]']
 
-        # Cache exact column names generated during the last transform pass
-        self.last_columns_out_ = np.array(X_df.columns, dtype=object)
         return X_df
 
     def get_feature_names_out(self, input_features=None):
-        # 1. If transformed recently, return exact output columns
-        if hasattr(self, "last_columns_out_"):
-            return self.last_columns_out_
-
-        # 2. Derive dynamically from input_features or saved feature_names_in_
         if input_features is not None:
             base_names = list(input_features)
         elif hasattr(self, "feature_names_in_"):
@@ -60,10 +53,11 @@ class MaintenanceFeatureEngineer(BaseEstimator, TransformerMixin):
 class IQROutlierClipper(OneToOneFeatureMixin, BaseEstimator, TransformerMixin):
     def __init__(self, factor=1.5):
         self.factor = factor
+
+    def fit(self, X, y=None):
         self.lower_bounds_ = {}
         self.upper_bounds_ = {}
 
-    def fit(self, X, y=None):
         if isinstance(X, pd.DataFrame):
             self.feature_names_in_ = np.array(X.columns, dtype=object)
             for col in X.select_dtypes(include=[np.number]).columns:
@@ -80,6 +74,7 @@ class IQROutlierClipper(OneToOneFeatureMixin, BaseEstimator, TransformerMixin):
                 iqr = q75 - q25
                 self.lower_bounds_[idx] = float(q25 - (self.factor * iqr))
                 self.upper_bounds_[idx] = float(q75 + (self.factor * iqr))
+
         self.n_features_in_ = len(self.feature_names_in_)
         return self
 
@@ -94,7 +89,7 @@ class IQROutlierClipper(OneToOneFeatureMixin, BaseEstimator, TransformerMixin):
         elif isinstance(X, np.ndarray):
             X_arr = X.copy()
             for idx, lower in self.lower_bounds_.items():
-                if idx < X_arr.shape[1]:
+                if isinstance(idx, int) and idx < X_arr.shape[1]:
                     upper = self.upper_bounds_[idx]
                     X_arr[:, idx] = np.clip(X_arr[:, idx], lower, upper)
             return X_arr
