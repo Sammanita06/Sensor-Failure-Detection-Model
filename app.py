@@ -1,4 +1,13 @@
 import os
+import sys
+
+# Ensure local modules can be found by joblib during deserialization
+try:
+    from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
+except ImportError:
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
+
 import joblib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,7 +19,6 @@ import streamlit as st
 from sklearn.inspection import permutation_importance
 
 # Custom modules
-from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
 from drift_monitor import run_two_tier_inference
 from retrain_module import execute_tier2_retrain
 from logger_db import fetch_historical_logs, log_batch_execution
