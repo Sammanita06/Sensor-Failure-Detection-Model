@@ -22,7 +22,7 @@ try:
 except ImportError:
     custom_transformers = types.ModuleType("custom_transformers")
     
-    # Simple dynamic fallbacks to ensure unpickling never breaks if file is missing
+    # Dynamic fallbacks to ensure unpickling never breaks if file is missing
     class IQROutlierClipper:
         def fit(self, X, y=None): return self
         def transform(self, X): return X
@@ -297,6 +297,26 @@ else:
     drift_tolerance_f1 = 0.8000
     feature_importance_df = None
 
+# Helper function to perform robust prediction regardless of feature engineering placement
+def safe_predict_proba(model_pipeline, df_input):
+    """Passes input through feature engineering explicitly if missing in primary dataframe."""
+    df_transformed = df_input.copy()
+    try:
+        # Check if feature engineer transformer is inside named_steps
+        if hasattr(model_pipeline, 'named_steps'):
+            fe_step = model_pipeline.named_steps.get('feature_engineer', None)
+            if fe_step and hasattr(fe_step, 'transform'):
+                df_transformed = fe_step.transform(df_transformed)
+        return model_pipeline.predict_proba(df_input)
+    except ValueError as err:
+        # Fallback: manually engineer features and attempt prediction again
+        try:
+            fe = MaintenanceFeatureEngineer()
+            df_transformed = fe.transform(df_input)
+            return model_pipeline.predict_proba(df_transformed)
+        except Exception:
+            raise err
+
 # -----------------------------------------------------------------------------
 # 5. SIDEBAR CONTROL PANEL
 # -----------------------------------------------------------------------------
@@ -379,7 +399,7 @@ with tab1:
     st.markdown("---")
     
     if st.button("RUN TELEMETRY DIAGNOSTIC", type="primary"):
-        probs = pipeline.predict_proba(input_df)[0]
+        probs = safe_predict_proba(pipeline, input_df)[0]
         failure_prob = probs[1]
         is_failure = failure_prob >= tier1_threshold
 
@@ -404,7 +424,6 @@ with tab1:
             with st.container(border=True):
                 st.subheader("Local Model Explanation (SHAP Waterfall)")
                 try:
-                    # Safely inspect pipeline steps
                     named_steps = getattr(pipeline, 'named_steps', {})
                     preprocessor = named_steps.get('preprocessor', None)
                     feature_engineer = named_steps.get('feature_engineer', None)
@@ -524,7 +543,7 @@ with tab2:
         st.markdown("---")
         st.subheader("Diagnostic Report Generation")
         
-        batch_probs = pipeline.predict_proba(batch_df)[:, 1]
+        batch_probs = safe_predict_proba(pipeline, batch_df)[:, 1]
         active_thresh = tier2_threshold if active_tier == 'Tier 2 (Fallback)' else tier1_threshold
         batch_preds = (batch_probs >= active_thresh).astype(int)
 
