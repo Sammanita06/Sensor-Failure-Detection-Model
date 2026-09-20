@@ -13,6 +13,7 @@ from sklearn.inspection import permutation_importance
 from custom_transformers import IQROutlierClipper, MaintenanceFeatureEngineer
 from drift_monitor import run_two_tier_inference
 from retrain_module import execute_tier2_retrain
+from logger_db import fetch_historical_logs, log_batch_execution
 
 # -----------------------------------------------------------------------------
 # PAGE CONFIGURATION & DEEP NAVY BLUE / GRID CSS
@@ -72,7 +73,7 @@ st.markdown(
         border-radius: 12px 12px 0px 0px;
         border-bottom: 2px solid #334155;
     }
-
+    
     .stTabs [data-baseweb="tab"] {
         height: 48px;
         background-color: #0f172a;
@@ -85,7 +86,7 @@ st.markdown(
         border-bottom: none;
         transition: all 0.2s ease-in-out;
     }
-
+    
     .stTabs [data-baseweb="tab"]:hover {
         background-color: #334155;
         color: #f8fafc !important;
@@ -127,7 +128,7 @@ st.markdown(
         padding: 0.6rem 1.4rem;
         transition: all 0.2s ease;
     }
-
+    
     .stButton > button:hover {
         background-color: #0369a1;
         box-shadow: 0px 0px 14px rgba(56, 189, 248, 0.4);
@@ -185,13 +186,13 @@ else:
 with st.sidebar:
     st.markdown("### ⚡ SYSTEM STATUS")
     st.caption("TELEMETRY ENGINE V2.4")
-
+    
     st.markdown("---")
     st.markdown("#### ⚙️ Threshold Configs")
     st.markdown(f"`TIER-1 CUTOFF:` **{tier1_threshold:.4f}**")
     st.markdown(f"`TIER-2 FALLBACK:` **{tier2_threshold:.4f}**")
     st.markdown(f"`DRIFT TOLERANCE:` **{drift_tolerance_f1:.2f} F1**")
-
+    
     st.markdown("---")
     st.markdown("#### 🟢 System Health Flag")
     st.success("MODEL PIPELINE ACTIVE & INLINE")
@@ -218,11 +219,12 @@ with hero_right:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Navigation Tabs with High Contrast Labels
-tab1, tab2, tab3 = st.tabs([
-    "🛠️ Single Machine Telemetry Diagnostic", 
-    "📁 Batch Ingestion & Drift Processor", 
-    "📊 Model Interpretability & SHAP Engineering"
+# Navigation Tabs
+tab1, tab2, tab3, tab4 = st.tabs([
+    "🛠️ Single Machine Diagnostic", 
+    "📁 Batch Diagnostics", 
+    "📊 Model Interpretability & SHAP",
+    "📈 MLOps Model Decay Timeline"
 ])
 
 # -----------------------------------------------------------------------------
@@ -259,7 +261,7 @@ with tab1:
     }])
 
     st.markdown("---")
-
+    
     if st.button("RUN TELEMETRY DIAGNOSTIC", type="primary"):
         probs = pipeline.predict_proba(input_df)[0]
         failure_prob = probs[1]
@@ -276,7 +278,7 @@ with tab1:
                     delta=f"Threshold: {tier1_threshold * 100:.1f}%",
                     delta_color="inverse" if is_failure else "normal"
                 )
-
+                
                 if is_failure:
                     st.error("⚠️ **CRITICAL: FAULT PREDICTED!** Immediate Maintenance Required.")
                 else:
@@ -307,7 +309,7 @@ with tab1:
                     plt.rcParams['axes.labelcolor'] = '#f8fafc'
                     plt.rcParams['xtick.color'] = '#f8fafc'
                     plt.rcParams['ytick.color'] = '#f8fafc'
-
+                    
                     shap.plots.waterfall(shap_values[0], show=False)
                     st.pyplot(fig)
                 except Exception as e:
@@ -318,13 +320,13 @@ with tab1:
 # -----------------------------------------------------------------------------
 with tab2:
     st.header("Batch CSV Ingestion & Drift Controller")
-    st.write("Upload machine log records (.csv) to perform batch diagnostics and continuously evaluate concept drift.")
+    st.write("Upload machine log records (.csv) to perform batch diagnostics, evaluate concept drift, and record telemetry.")
 
     uploaded_file = st.file_uploader("Upload Sensor Diagnostic Logs (CSV)", type=["csv"])
 
     if uploaded_file is not None:
         batch_df = pd.read_csv(uploaded_file)
-
+        
         with st.container(border=True):
             st.caption("BATCH STREAM DATA PREVIEW")
             st.dataframe(batch_df.head(), use_container_width=True)
@@ -333,6 +335,17 @@ with tab2:
 
         # Execute Two-Tier Inference
         results = run_two_tier_inference(batch_df, y_true=y_true)
+
+        # Log metrics to SQLite database upon inference completion
+        if results['metrics']:
+            log_batch_execution(
+                batch_size=len(batch_df),
+                f1=results['metrics']['f1'],
+                precision=results['metrics']['precision'],
+                recall=results['metrics']['recall'],
+                tier_used=results['active_tier'],
+                drift_detected=results['drift_alert']
+            )
 
         st.markdown("---")
         st.subheader("Drift Monitoring & Operational Tier Status")
@@ -394,7 +407,7 @@ with tab2:
         # Download Report Protocol
         st.markdown("---")
         st.subheader("Diagnostic Report Generation")
-
+        
         batch_probs = pipeline.predict_proba(batch_df)[:, 1]
         active_thresh = tier2_threshold if results['active_tier'] == 'Tier 2 (Fallback)' else tier1_threshold
         batch_preds = (batch_probs >= active_thresh).astype(int)
@@ -464,3 +477,36 @@ with tab3:
 
     else:
         st.info("💡 Feature importance metrics not detected in model payload. Execute `python train_master.py` to regenerate the payload.")
+
+# -----------------------------------------------------------------------------
+# TAB 4: MLOPS MODEL DECAY TIMELINE
+# -----------------------------------------------------------------------------
+with tab4:
+    st.header("📈 Model Decay & Operational Audit Trail")
+    st.write("Track live performance trends, metric degradation, and historical batch execution logs.")
+
+    logs_df = fetch_historical_logs()
+
+    if not logs_df.empty:
+        fig_decay = px.line(
+            logs_df,
+            x='timestamp',
+            y=['f1_score', 'precision_score', 'recall_score'],
+            markers=True,
+            title='Historical Model Performance Across Batch Inferences',
+            labels={'value': 'Score', 'timestamp': 'Execution Time'}
+        )
+        fig_decay.update_layout(
+            paper_bgcolor='#1e293b',
+            plot_bgcolor='#1e293b',
+            font=dict(color='#f8fafc'),
+            height=450
+        )
+        st.plotly_chart(fig_decay, use_container_width=True)
+
+        st.subheader("Raw Operational Logs")
+        st.dataframe(
+            logs_df.sort_values(by='id', ascending=False), use_container_width=True
+        )
+    else:
+        st.info("No execution logs found in SQLite database. Run batch inference to generate operational logs.")
